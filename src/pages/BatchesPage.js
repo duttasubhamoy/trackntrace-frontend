@@ -1,0 +1,591 @@
+import React, { useState, useEffect } from "react";
+import Modal from "react-modal";
+import Sidebar from "../components/Sidebar";
+import Header from "../components/Header";
+import { CgSpinner } from "react-icons/cg";
+import { useNavigate } from "react-router-dom";
+import axios from "../utils/axiosConfig";
+import { fetchCompanyCashbackStatus } from "../utils/companyUtils";
+import TableWithSearchAndPagination from "../components/TableWithSearchAndPagination";
+
+Modal.setAppElement("#root"); // For accessibility
+
+const BatchesPage = () => {
+  const [isLoading, setIsLoading] = useState(true);
+  const [batches, setBatches] = useState([]);
+  const [filteredBatches, setFilteredBatches] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [showModal, setShowModal] = useState(false);
+  const [newBatch, setNewBatch] = useState({
+    batch_number: "",
+    exp_date: "",
+    mfg_date: "",
+    product_id: "",
+    extra_fields: {},
+    scheme_id: "",
+    mrp: "",
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [extraFields, setExtraFields] = useState([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [currentPage, setCurrentPage] = useState(0);
+  const [batchesPerPage] = useState(10);
+  const [duplicateBatchError, setDuplicateBatchError] = useState("");
+  const [companyCashbackEnabled, setCompanyCashbackEnabled] = useState(false);
+  const [schemes, setSchemes] = useState([]);
+  const navigate = useNavigate();
+  const [userData, setUserData] = useState({
+    name: "",
+    role: "",
+    lastLogin: "",
+    companyName: "",
+  });
+  const [inputError, setInputError] = useState({
+    batch_number: false,
+    exp_date: false,
+    mfg_date: false,
+    product_id: false,
+    mrp: false,
+  });
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const userRes = await axios.get("/protected");
+        const { name, role, last_login, company_name, company_id } =
+          userRes.data;
+        setUserData({
+          name,
+          role,
+          lastLogin: last_login,
+          companyName: company_name,
+        });
+        if (role === "salesman") {
+          navigate("/seller");
+        }
+
+        // For admin users, company_id might be null - handle this case
+        if (company_id) {
+          // Only fetch company details if company_id exists
+          try {
+            const companyRes = await axios.get(`/company/${company_id}`);
+            setCompanyCashbackEnabled(companyRes.data.cashback_enabled);
+          } catch (companyError) {
+            console.error("Error fetching company data:", companyError);
+            // Don't navigate away, just set cashback to false as default
+            setCompanyCashbackEnabled(false);
+          }
+        } else {
+          // For admin users without company_id, set cashback to false
+          // You could also set it to true if you want admin to see all features
+          setCompanyCashbackEnabled(false);
+        }
+
+        const productsRes = await axios.get("/products");
+        setProducts(productsRes.data);
+
+        const batchesRes = await axios.get("/batches");
+        setBatches(batchesRes.data);
+        setFilteredBatches(batchesRes.data);
+
+        const extraFieldsRes = await axios.get("/company-extra-fields");
+        setExtraFields(extraFieldsRes.data.extra_field_batch);
+
+        const schemesRes = await axios.get("/view-scheme");
+        setSchemes(schemesRes.data);
+      } catch (error) {
+        console.error("Error fetching data:", error);
+        navigate("/login");
+      }
+      setIsLoading(false);
+    };
+    fetchData();
+  }, [navigate]);
+
+  useEffect(() => {
+    const filtered = batches.filter((batch) =>
+      batch.batch_number.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+    setFilteredBatches(filtered);
+  }, [searchTerm, batches]);
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setNewBatch({ ...newBatch, [name]: value });
+  };
+
+  const handleExtraFieldChange = (e) => {
+    const { name, value } = e.target;
+    setNewBatch((prevBatch) => ({
+      ...prevBatch,
+      extra_fields: { ...prevBatch.extra_fields, [name]: value },
+    }));
+  };
+
+  const validateInputs = () => {
+    const errors = {
+      batch_number: !newBatch.batch_number || newBatch.batch_number.length > 7,
+      exp_date: !newBatch.exp_date,
+      mfg_date: !newBatch.mfg_date,
+      product_id: !newBatch.product_id,
+      mrp: !newBatch.mrp,
+    };
+    setInputError(errors);
+    // If any error is true, return false
+    return !(
+      errors.batch_number ||
+      errors.exp_date ||
+      errors.mfg_date ||
+      errors.product_id ||
+      errors.mrp
+    );
+  };
+
+  const handleFormSubmit = async () => {
+    if (!validateInputs()) return;
+    setIsSubmitting(true);
+    setDuplicateBatchError(""); 
+    try {
+      // Create a copy of the batch data to properly handle the scheme_id
+      const batchData = { ...newBatch };
+      
+      // Ensure scheme_id is properly handled (null if empty, otherwise convert to integer)
+      if (!batchData.scheme_id) {
+        batchData.scheme_id = null; // Send null if empty
+      } else {
+        batchData.scheme_id = parseInt(batchData.scheme_id); // Ensure it's an integer
+      }
+      
+      if (editMode) {
+        // Update existing batch
+        console.log("Batch details being sent for update:", batchData);
+        await axios.put(`/update-batch/${editBatchId}`, batchData);
+        alert("Batch Updated Successfully");
+      } else {
+        // Create new batch
+        console.log("Batch details being sent to backend:", batchData);
+        await axios.post("/add-batch", batchData);
+        alert("Batch Added Successfully");
+      }
+      
+      // Reset form
+      setNewBatch({
+        batch_number: "",
+        exp_date: "",
+        mfg_date: "",
+        product_id: "",
+        extra_fields: {},
+        scheme_id: "",
+        mrp: "",
+      });
+      setInputError({
+        batch_number: false,
+        exp_date: false,
+        mfg_date: false,
+        product_id: false,
+        mrp: false,
+      });
+      setEditMode(false);
+      setEditBatchId(null);
+      setShowModal(false);
+      setIsSubmitting(false);
+      
+      // Refetch batches after adding/updating
+      const response = await axios.get("/batches");
+      setBatches(response.data);
+    } catch (error) {
+      if (
+        error.response &&
+        error.response.status === 409 &&
+        error.response.data?.error_code === "DUPLICATE_BATCH_NUMBER"
+      ) {
+        setDuplicateBatchError(error.response.data.msg);
+      } else {
+        alert(
+          error.response?.data?.msg ||
+            `Failed to ${editMode ? "update" : "add"} batch`
+        );
+      }
+      setIsSubmitting(false);
+    }
+  };
+
+  const handlePageClick = (page) => {
+    setCurrentPage(page);
+  };
+
+  const indexOfLastBatch = (currentPage + 1) * batchesPerPage;
+  const indexOfFirstBatch = indexOfLastBatch - batchesPerPage;
+  const currentBatches = filteredBatches.slice(
+    indexOfFirstBatch,
+    indexOfLastBatch
+  );
+
+  // Calculate the total page count
+  const totalPages = Math.ceil(filteredBatches.length / batchesPerPage);
+
+  // Handle editing a batch
+  const [editMode, setEditMode] = useState(false);
+  const [editBatchId, setEditBatchId] = useState(null);
+
+  const handleEditBatch = async (batchId) => {
+    try {
+      setIsSubmitting(true);
+      // Fetch the batch data
+      const response = await axios.get(`/batch/${batchId}`);
+      const batchData = response.data;
+      
+      // Set the batch data in the form
+      setNewBatch({
+        batch_number: batchData.batch_number || "",
+        exp_date: batchData.exp_date ? batchData.exp_date.split('T')[0] : "",
+        mfg_date: batchData.mfg_date ? batchData.mfg_date.split('T')[0] : "",
+        product_id: batchData.product_id || "",
+        extra_fields: batchData.extra_fields || {},
+        scheme_id: batchData.schemes && batchData.schemes.length > 0 ? batchData.schemes[0].id : "",
+        mrp: batchData.mrp || "",
+      });
+      
+      // Set edit mode
+      setEditMode(true);
+      setEditBatchId(batchId);
+      
+      // Open the modal
+      setShowModal(true);
+      setIsSubmitting(false);
+    } catch (error) {
+      console.error("Error fetching batch for edit:", error);
+      alert("Failed to load batch details.");
+      setIsSubmitting(false);
+    }
+  };
+
+  // Handle edit button click from TableWithSearchAndPagination
+  const handleEditButtonClick = (rowIndex) => {
+    if (rowIndex !== null && currentBatches[rowIndex]) {
+      const batchId = currentBatches[rowIndex].id;
+      handleEditBatch(batchId);
+    }
+  };
+  
+  // Handle delete functionality
+  const handleDeleteBatch = async (batchId) => {
+    try {
+      setIsSubmitting(true);
+      // Call API to delete batch
+      const response = await axios.delete(`/delete-batch/${batchId}`);
+      
+      // Show success message
+      alert(response.data?.msg || "Batch deleted successfully");
+      
+      // Refetch batches after deletion
+      const batchesResponse = await axios.get("/batches");
+      setBatches(batchesResponse.data);
+      setIsSubmitting(false);
+    } catch (error) {
+      console.error("Error deleting batch:", error);
+      
+      // Show appropriate error message
+      let errorMessage = "Failed to delete batch";
+      
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        errorMessage = error.response.data?.msg || errorMessage;
+        
+        if (error.response.status === 403) {
+          errorMessage = "You don't have permission to delete this batch.";
+        } else if (error.response.status === 404) {
+          errorMessage = "Batch not found. It may have already been deleted.";
+        }
+      } else if (error.request) {
+        // The request was made but no response was received
+        errorMessage = "No response from server. Please check your connection.";
+      } 
+      
+      alert(errorMessage);
+      setIsSubmitting(false);
+    }
+  };
+
+  // Updated Table Headers
+  const tableHeaders = [
+    "Batch Number",
+    "Product Alias",
+    "MRP",
+    "Manufacturing Date",
+    "Expiration Date",
+    "Plant Name",
+  ];
+
+  // Table Rows
+  const tableRows = currentBatches.map((batch) => [
+    batch.batch_number,
+    batch.product_alias.product_alias, // Access product_alias from nested object
+    batch.mrp,
+    batch.mfg_date,
+    batch.exp_date,
+    batch.plant_name,
+  ]);
+  return (
+    <div className="flex bg-gray-100 min-h-screen">
+      <Sidebar
+        userData={userData}
+        companyCashbackEnabled={companyCashbackEnabled}
+      />
+      <div className="flex-1">
+        {isLoading ? (
+          <div className="flex justify-center items-center h-full">
+            <CgSpinner className="animate-spin text-4xl" />
+          </div>
+        ) : (
+          <>
+            <Header userData={userData} />
+            <div className="p-6">
+              <TableWithSearchAndPagination
+                tableHeaders={tableHeaders}
+                tableRows={tableRows}
+                searchTerm={searchTerm}
+                setSearchTerm={setSearchTerm}
+                buttonText="Add New Batch"
+                onButtonClick={() => {
+                  setNewBatch({
+                    batch_number: "",
+                    exp_date: "",
+                    mfg_date: "",
+                    product_id: "",
+                    extra_fields: {},
+                    scheme_id: "",
+                    mrp: "",
+                  });
+                  setEditMode(false);
+                  setEditBatchId(null);
+                  setShowModal(true);
+                }}
+                pageCount={Math.ceil(filteredBatches.length / batchesPerPage)}
+                onPageChange={handlePageClick}
+                currentPage={currentPage}
+                userRole={userData.role}
+                onEditClick={handleEditButtonClick}
+                onDeleteRequest={(rowIndex) => {
+                  if (rowIndex !== null && currentBatches[rowIndex]) {
+                    const batchId = currentBatches[rowIndex].id;
+                    handleDeleteBatch(batchId);
+                  }
+                }}
+              />
+
+              <Modal
+                isOpen={showModal}
+                onRequestClose={() => {
+                  setShowModal(false);
+                  setEditMode(false);
+                  setEditBatchId(null);
+                }}
+                contentLabel={editMode ? "Edit Batch" : "Add New Batch"}
+                className="bg-white p-6 rounded shadow-lg w-1/2 mx-auto mt-10"
+                overlayClassName="fixed inset-0 bg-black bg-opacity-50"
+                style={{
+                  content: {
+                    maxHeight: "95vh",
+                    overflowY: "auto",
+                  },
+                }}
+              >
+                <button
+                  onClick={() => {
+                    setShowModal(false);
+                    setEditMode(false);
+                    setEditBatchId(null);
+                  }}
+                  className="absolute top-4 right-4 text-gray-500 hover:text-gray-700"
+                >
+                  &times;
+                </button>
+                <h2 className="text-xl font-bold mb-2">
+                  {editMode ? "Edit Batch" : "Add New Batch"}
+                </h2>
+
+                {/* Input fields arranged in 2 columns */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Batch Number
+                    </label>
+                    <input
+                      type="text"
+                      name="batch_number"
+                      value={newBatch.batch_number}
+                      onChange={handleInputChange}
+                      maxLength={10}
+                      className={`w-full p-2 border rounded ${
+                        inputError.batch_number || duplicateBatchError
+                          ? "border-red-500"
+                          : "border-gray-300"
+                      }`}
+                    />
+                    {inputError.batch_number && (
+                      <span className="text-red-500 text-xs">
+                        {!newBatch.batch_number
+                          ? "Required"
+                          : "Max 10 characters allowed"}
+                      </span>
+                    )}
+                    {duplicateBatchError && (
+                      <span className="text-red-500 text-xs">
+                        {duplicateBatchError}
+                      </span>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Max Retail Price
+                    </label>
+                    <input
+                      type="number"
+                      name="mrp"
+                      value={newBatch.mrp}
+                      onChange={handleInputChange}
+                      className={`w-full p-2 border rounded ${
+                        inputError.mrp ? "border-red-500" : "border-gray-300"
+                      }`}
+                    />
+                    {inputError.mrp && (
+                      <span className="text-red-500 text-xs">Required</span>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Expiration Date
+                    </label>
+                    <input
+                      type="date"
+                      name="exp_date"
+                      value={newBatch.exp_date}
+                      onChange={handleInputChange}
+                      className={`w-full p-2 border rounded ${
+                        inputError.exp_date
+                          ? "border-red-500"
+                          : "border-gray-300"
+                      }`}
+                    />
+                    {inputError.exp_date && (
+                      <span className="text-red-500 text-xs">Required</span>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Manufacturing Date
+                    </label>
+                    <input
+                      type="date"
+                      name="mfg_date"
+                      value={newBatch.mfg_date}
+                      onChange={handleInputChange}
+                      className={`w-full p-2 border rounded ${
+                        inputError.mfg_date
+                          ? "border-red-500"
+                          : "border-gray-300"
+                      }`}
+                    />
+                    {inputError.mfg_date && (
+                      <span className="text-red-500 text-xs">Required</span>
+                    )}
+                  </div>
+
+                  {/* Product & Cashback Fields in One Row */}
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Product
+                    </label>
+                    <select
+                      name="product_id"
+                      value={newBatch.product_id}
+                      onChange={handleInputChange}
+                      className={`w-full p-2 border rounded ${
+                        inputError.product_id
+                          ? "border-red-500"
+                          : "border-gray-300"
+                      }`}
+                    >
+                      <option value="">Select Product</option>
+                      {products.map((product) => (
+                        <option key={product.id} value={product.id}>
+                          {product.product_alias}
+                        </option>
+                      ))}
+                    </select>
+                    {inputError.product_id && (
+                      <span className="text-red-500 text-xs">Required</span>
+                    )}
+                  </div>
+                  {companyCashbackEnabled && (
+                    <div>
+                      <label className="block text-sm font-medium mb-1">
+                        Scheme
+                      </label>
+                      <select
+                        name="scheme_id"
+                        value={newBatch.scheme_id}
+                        onChange={handleInputChange}
+                        className="w-full p-2 border rounded border-gray-300"
+                      >
+                        <option value="">Select Scheme</option>
+                        {schemes.map((scheme) => (
+                          <option key={scheme.id} value={scheme.id}>
+                            {scheme.scheme_name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                {/* Render extra fields dynamically */}
+                <div className="grid grid-cols-2 gap-4 mt-4">
+                  {extraFields.map((field, index) => (
+                    <div key={index}>
+                      <label className="block text-sm font-medium mb-1">
+                        {field}
+                      </label>
+                      <input
+                        type="text"
+                        name={field}
+                        value={newBatch.extra_fields[field] || ""}
+                        onChange={handleExtraFieldChange}
+                        className="w-full p-2 border rounded border-gray-300"
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Add Batch Button */}
+                <div className="mt-6">
+                  <button
+                    onClick={handleFormSubmit}
+                    className={`w-full bg-teal-600 text-white font-bold px-4 py-3 rounded text-lg ${
+                      isSubmitting
+                        ? "opacity-50 cursor-not-allowed"
+                        : "hover:bg-teal-700"
+                    }`}
+                    disabled={isSubmitting}
+                  >
+                    {isSubmitting
+                      ? editMode
+                        ? "Updating..."
+                        : "Adding..."
+                      : editMode
+                      ? "UPDATE BATCH"
+                      : "ADD BATCH"}
+                  </button>
+                </div>
+              </Modal>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default BatchesPage;
