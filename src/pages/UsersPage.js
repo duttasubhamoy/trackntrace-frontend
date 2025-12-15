@@ -79,6 +79,19 @@ const UsersPage = () => {
     fetchUserData();
   }, [navigate]);
 
+  // Add search filter effect
+  useEffect(() => {
+    if (users.length > 0) {
+      const filtered = users.filter((user) =>
+        user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        user.mobile?.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+      setFilteredUsers(filtered);
+      setCurrentPage(0); // Reset to first page when search term changes
+    }
+  }, [searchTerm, users]);
+
   useEffect(() => {
     const fetchUsers = async () => {
       try {

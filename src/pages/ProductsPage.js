@@ -17,6 +17,7 @@ const ProductsPage = () => {
   const [filteredProducts, setFilteredProducts] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [variantMode, setVariantMode] = useState(false); // Added for variant creation
   const [editProductId, setEditProductId] = useState(null);
   const [companyCashbackEnabled, setCompanyCashbackEnabled] = useState(false);
   const [newProduct, setNewProduct] = useState({
@@ -29,6 +30,8 @@ const ProductsPage = () => {
     technical_name: "", // <-- added
     cautionary_symbol: "", // <-- added
     antidote_statement: "", // <-- added
+    cir_reg_no: "", // <-- added for product registration
+    company_id: "", // <-- added for admin to select company
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
@@ -49,7 +52,9 @@ const ProductsPage = () => {
     name: false,
     quantity: false,
     unit: false,
+    company_id: false,
   });
+  const [companies, setCompanies] = useState([]);
 
   useEffect(() => {
     const fetchUserData = async () => {
@@ -63,6 +68,7 @@ const ProductsPage = () => {
           lastLogin: last_login,
           companyName: company_name,
         });
+        console.log("ProductsPage - User role set to:", role); // Debug log
         if (role === "salesman") {
           navigate("/dashboard");
         }
@@ -84,8 +90,20 @@ const ProductsPage = () => {
           setCompanyCashbackEnabled(false);
         }
 
+        // If user is admin, fetch all companies
+        if (role === "admin") {
+          try {
+            const companiesRes = await axios.get("/companies");
+            // Log the companies data to the console for debugging
+            console.log("Companies API Response:", companiesRes.data);
+            setCompanies(companiesRes.data);
+          } catch (error) {
+            console.error("Error fetching companies:", error);
+          }
+        }
+
         fetchProducts();
-        fetchExtraFields();
+        fetchExtraFields(role); // Pass the user role
       } catch (error) {
         console.error("Error fetching user data:", error);
         navigate("/login");
@@ -104,7 +122,12 @@ const ProductsPage = () => {
       }
     };
 
-    const fetchExtraFields = async () => {
+    const fetchExtraFields = async (userRole) => {
+      // Skip this API call if user is admin
+      if (userRole === "admin") {
+        return;
+      }
+      
       try {
         const response = await axios.get("/company-extra-fields");
         setExtraFields(response.data);
@@ -173,13 +196,16 @@ const ProductsPage = () => {
       name: !newProduct.name,
       quantity: !newProduct.quantity,
       unit: !newProduct.unit,
+      // Only validate company_id for admin users
+      company_id: userData.role === "admin" && !newProduct.company_id
     };
     setInputError(errors);
     return !(
       errors.product_alias ||
       errors.name ||
       errors.quantity ||
-      errors.unit
+      errors.unit ||
+      errors.company_id
     );
   };
 
@@ -196,6 +222,13 @@ const ProductsPage = () => {
       formData.append("technical_name", newProduct.technical_name);
       formData.append("cautionary_symbol", newProduct.cautionary_symbol);
       formData.append("antidote_statement", newProduct.antidote_statement);
+      formData.append("cir_reg_no", newProduct.cir_reg_no);
+      
+      // For admin users, include the selected company_id
+      if (userData.role === "admin" && newProduct.company_id) {
+        formData.append("company_id", newProduct.company_id);
+        console.log("Adding company_id to request:", newProduct.company_id);
+      }
 
       // Add extra fields to the form data as a JSON string
       formData.append('extra_fields', JSON.stringify(newProduct.extra_fields));
@@ -228,6 +261,14 @@ const ProductsPage = () => {
           },
         });
         alert("Product updated successfully");
+      } else if (variantMode) {
+        // Create product variant
+        await axios.post(`/add-new-variant/${editProductId}`, formData, {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+        });
+        alert("Product Variant Created Successfully");
       } else {
         // Create new product
         await axios.post("/add-product", formData, {
@@ -249,6 +290,8 @@ const ProductsPage = () => {
         technical_name: "",
         cautionary_symbol: "",
         antidote_statement: "",
+        cir_reg_no: "",
+        company_id: "",
         video_file: null,
         image_file: null,
         pdf_file: null,
@@ -260,6 +303,7 @@ const ProductsPage = () => {
         unit: false,
       });
       setEditMode(false);
+      setVariantMode(false); // Reset variant mode
       setEditProductId(null);
       setShowModal(false);
       setIsSubmitting(false);
@@ -269,6 +313,47 @@ const ProductsPage = () => {
       setProducts(response.data);
     } catch (error) {
       console.error("Error adding product:", error);
+      setIsSubmitting(false);
+    }
+  };
+
+  // Handle creating a product variant
+  const handleAddVariant = async (productId) => {
+    try {
+      setIsSubmitting(true);
+      // Fetch the product data
+      const response = await axios.get(`/product/${productId}`);
+      const productData = response.data;
+      
+      // Set the base product data for the variant, but change the alias to indicate it's a variant
+      setNewProduct({
+        product_alias: `${productData.product_alias} - Variant`, // Suggest a variant name
+        name: productData.name || "",
+        quantity: productData.quantity || "",
+        unit: productData.unit || "",
+        description: productData.description || "",
+        technical_name: productData.technical_name || "",
+        cautionary_symbol: productData.cautionary_symbol || "",
+        antidote_statement: productData.antidote_statement || "",
+        cir_reg_no: productData.cir_reg_no || "",
+        company_id: productData.company_id || "",
+        extra_fields: productData.extra_fields || {},
+        video_file: null,
+        image_file: null,
+        pdf_file: null,
+      });
+      
+      // Set a special variant creation mode
+      setEditMode(false); // Not in edit mode
+      setVariantMode(true); // In variant creation mode
+      setEditProductId(productId); // Store the source product ID
+      
+      // Open the modal
+      setShowModal(true);
+      setIsSubmitting(false);
+    } catch (error) {
+      console.error("Error fetching product for variant creation:", error);
+      alert("Failed to load product details.");
       setIsSubmitting(false);
     }
   };
@@ -291,6 +376,8 @@ const ProductsPage = () => {
         technical_name: productData.technical_name || "",
         cautionary_symbol: productData.cautionary_symbol || "",
         antidote_statement: productData.antidote_statement || "",
+        cir_reg_no: productData.cir_reg_no || "",
+        company_id: productData.company_id || "",
         extra_fields: productData.extra_fields || {},
         // Files cannot be pre-filled, so keep them null
         video_file: null,
@@ -313,10 +400,14 @@ const ProductsPage = () => {
   };
 
   // Handle edit button click from TableWithSearchAndPagination
-  const handleEditButtonClick = (rowIndex) => {
+  const handleEditButtonClick = (rowIndex, mode = 'edit') => {
     if (rowIndex !== null && currentProducts[rowIndex]) {
       const productId = currentProducts[rowIndex].id;
-      handleEditProduct(productId);
+      if (mode === 'variant') {
+        handleAddVariant(productId);
+      } else {
+        handleEditProduct(productId);
+      }
     }
   };
 
@@ -396,11 +487,14 @@ const ProductsPage = () => {
                     technical_name: "",
                     cautionary_symbol: "",
                     antidote_statement: "",
+                    cir_reg_no: "",
+                    company_id: "",
                     video_file: null,
                     image_file: null,
                     pdf_file: null,
                   });
                   setEditMode(false);
+                  setVariantMode(false);
                   setEditProductId(null);
                   setShowModal(true);
                 }}
@@ -418,6 +512,7 @@ const ProductsPage = () => {
                 onRequestClose={() => {
                   setShowModal(false);
                   setEditMode(false);
+                  setVariantMode(false);
                   setEditProductId(null);
                 }}
                 contentLabel={editMode ? "Edit Product" : "Add New Product"}
@@ -429,6 +524,7 @@ const ProductsPage = () => {
                   onClick={() => {
                     setShowModal(false);
                     setEditMode(false);
+                    setVariantMode(false);
                     setEditProductId(null);
                   }}
                   className="absolute top-4 right-4 text-gray-500 hover:text-gray-700"
@@ -438,7 +534,14 @@ const ProductsPage = () => {
 
                 {/* Fixed Header */}
                 <div className="sticky top-0 bg-white p-4 border-b border-gray-300 z-10">
-                  <h2 className="text-xl font-bold">{editMode ? "Edit Product" : "Add New Product"}</h2>
+                  <h2 className="text-xl font-bold">
+                    {editMode 
+                      ? "Edit Product" 
+                      : variantMode 
+                        ? "Add Product Variant" 
+                        : "Add New Product"
+                    }
+                  </h2>
                 </div>
 
                 {/* Scrollable Content */}
@@ -461,7 +564,7 @@ const ProductsPage = () => {
                         }`}
                       />
                       {inputError.product_alias && (
-                        <span className="text-red-500 text-xs">Required</span>
+                        <span className="text-red-500 text-xs">Require</span>
                       )}
                     </div>
                     <div>
@@ -528,6 +631,39 @@ const ProductsPage = () => {
                         className="w-full p-2 border rounded"
                       />
                     </div>
+                    
+                    {/* Company Dropdown for Admin Users */}
+                    {userData.role === "admin" && (
+                      <div className="col-span-2">
+                        <label className="block text-sm font-medium mb-1">
+                          Company
+                        </label>
+                        <select
+                          name="company_id"
+                          value={newProduct.company_id}
+                          onChange={handleInputChange}
+                          className={`w-full p-2 border rounded ${
+                            inputError.company_id ? "border-red-500" : "border-gray-300"
+                          }`}
+                        >
+                          <option value="">Select Company</option>
+                          {console.log("Companies in dropdown render:", companies)}
+                          {companies && companies.map((company) => {
+                            console.log("Company item:", company);
+                            const companyId = company.id || company._id;
+                            const companyName = company.company_name || company.name;
+                            return (
+                              <option key={companyId} value={companyId}>
+                                {companyName}
+                              </option>
+                            );
+                          })}
+                        </select>
+                        {inputError.company_id && (
+                          <span className="text-red-500 text-xs">Required for admin users</span>
+                        )}
+                      </div>
+                    )}
                     <div>
                       <label className="block text-sm font-medium mb-1">
                         Technical Name
@@ -563,8 +699,8 @@ const ProductsPage = () => {
                       </label>
                       <input
                         type="text"
-                        name="cir_regn_no"
-                        value={newProduct.cir_regn_no}
+                        name="cir_reg_no"
+                        value={newProduct.cir_reg_no}
                         onChange={handleInputChange}
                         className="w-full p-2 border rounded"
                       />
@@ -655,8 +791,8 @@ const ProductsPage = () => {
                       disabled={isSubmitting}
                     >
                       {isSubmitting 
-                        ? (editMode ? "Updating..." : "Adding...") 
-                        : (editMode ? "UPDATE PRODUCT" : "ADD PRODUCT")}
+                        ? (editMode ? "Updating..." : variantMode ? "Creating Variant..." : "Adding...") 
+                        : (editMode ? "UPDATE PRODUCT" : variantMode ? "ADD VARIANT" : "ADD PRODUCT")}
                     </button>
                   </div>
                 </div>

@@ -24,6 +24,8 @@ const BatchesPage = () => {
     extra_fields: {},
     scheme_id: "",
     mrp: "",
+    company_id: "", // Added for admin to select company
+    no_of_inner_box: "", // Added for packing enabled companies, will be parsed as integer when submitting
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [extraFields, setExtraFields] = useState([]);
@@ -32,6 +34,7 @@ const BatchesPage = () => {
   const [batchesPerPage] = useState(10);
   const [duplicateBatchError, setDuplicateBatchError] = useState("");
   const [companyCashbackEnabled, setCompanyCashbackEnabled] = useState(false);
+  const [packingEnabled, setPackingEnabled] = useState(false);
   const [schemes, setSchemes] = useState([]);
   const navigate = useNavigate();
   const [userData, setUserData] = useState({
@@ -46,7 +49,10 @@ const BatchesPage = () => {
     mfg_date: false,
     product_id: false,
     mrp: false,
+    company_id: false,
+    no_of_inner_box: false, // Added for packing enabled companies
   });
+  const [companies, setCompanies] = useState([]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -59,40 +65,78 @@ const BatchesPage = () => {
           role,
           lastLogin: last_login,
           companyName: company_name,
+          companyId: company_id,
         });
+        console.log("BatchesPage - User role set to:", role); // Debug log
         if (role === "salesman") {
           navigate("/seller");
         }
 
-        // For admin users, company_id might be null - handle this case
-        if (company_id) {
+        // For admin users, fetch all companies
+        if (role === "admin") {
+          try {
+            const companiesRes = await axios.get("/companies");
+            console.log("Companies data:", companiesRes.data);
+            setCompanies(companiesRes.data);
+            // Admin has no specific company cashback, set to false by default
+            setCompanyCashbackEnabled(false);
+          } catch (error) {
+            console.error("Error fetching companies:", error);
+          }
+        } else if (company_id) {
+          // For non-admin users, set the company_id in newBatch
+          setNewBatch(prevState => ({
+            ...prevState,
+            company_id: company_id
+          }));
+          
           // Only fetch company details if company_id exists
           try {
             const companyRes = await axios.get(`/company/${company_id}`);
+            console.log(companyRes.data)
             setCompanyCashbackEnabled(companyRes.data.cashback_enabled);
+            // Check and set packing_enabled status
+            setPackingEnabled(companyRes.data.packing_enabled === true);
           } catch (companyError) {
             console.error("Error fetching company data:", companyError);
-            // Don't navigate away, just set cashback to false as default
+            // Don't navigate away, just set defaults
             setCompanyCashbackEnabled(false);
+            setPackingEnabled(false);
           }
         } else {
-          // For admin users without company_id, set cashback to false
-          // You could also set it to true if you want admin to see all features
+          // For users without company_id, set cashback to false
           setCompanyCashbackEnabled(false);
         }
 
-        const productsRes = await axios.get("/products");
-        setProducts(productsRes.data);
+        // Fetch products based on user role
+        if (role === "admin") {
+          // Admin without selected company will see no products initially
+          // Products will be fetched when a company is selected
+          setProducts([]);
+        } else {
+          // Non-admin users will see products for their company
+          const productsRes = await axios.get("/products");
+          setProducts(productsRes.data);
+        }
 
         const batchesRes = await axios.get("/batches");
         setBatches(batchesRes.data);
         setFilteredBatches(batchesRes.data);
 
-        const extraFieldsRes = await axios.get("/company-extra-fields");
-        setExtraFields(extraFieldsRes.data.extra_field_batch);
+        // Skip extra fields API call if user is admin
+        if (role !== "admin") {
+          const extraFieldsRes = await axios.get("/company-extra-fields");
+          setExtraFields(extraFieldsRes.data.extra_field_batch);
+        }
 
-        const schemesRes = await axios.get("/view-scheme");
-        setSchemes(schemesRes.data);
+        // For admin, fetch schemes with company_id param if company selected
+        if (role === "admin" && company_id) {
+          const schemesRes = await axios.get(`/view-scheme?company_id=${company_id}`);
+          setSchemes(schemesRes.data);
+        } else {
+          const schemesRes = await axios.get("/view-scheme");
+          setSchemes(schemesRes.data);
+        }
       } catch (error) {
         console.error("Error fetching data:", error);
         navigate("/login");
@@ -107,11 +151,85 @@ const BatchesPage = () => {
       batch.batch_number.toLowerCase().includes(searchTerm.toLowerCase())
     );
     setFilteredBatches(filtered);
+    // Reset to first page whenever search results change
+    setCurrentPage(0);
   }, [searchTerm, batches]);
+
+    // Function to fetch company details and check packing_enabled
+  const fetchCompanyDetails = async (companyId) => {
+    try {
+      const companyRes = await axios.get(`/company/${companyId}`);
+      const isPackingEnabled = companyRes.data.packing_enabled === true;
+      setPackingEnabled(isPackingEnabled);
+      console.log(`Company ${companyId} packing_enabled:`, isPackingEnabled);
+      
+      // Also update cashback status while we're fetching company details
+      setCompanyCashbackEnabled(companyRes.data.cashback_enabled);
+      
+      return isPackingEnabled;
+    } catch (error) {
+      console.error(`Error fetching details for company ${companyId}:`, error);
+      setPackingEnabled(false);
+      return false;
+    }
+  };
+
+  // Function to fetch products for a specific company
+  const fetchProductsForCompany = async (companyId) => {
+    try {
+      const response = await axios.get(`/products-by-company/${companyId}`);
+      setProducts(response.data);
+      
+      // Also fetch schemes for this company
+      try {
+        const schemeResponse = await axios.get(`/schemes-by-company/${companyId}`);
+        setSchemes(schemeResponse.data);
+      } catch (schemeError) {
+        console.error("Error fetching schemes:", schemeError);
+        setSchemes([]);
+      }
+    } catch (error) {
+      console.error("Error fetching products:", error);
+      setProducts([]);
+    }
+  };
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setNewBatch({ ...newBatch, [name]: value });
+    
+    // Handle no_of_inner_box as an integer or empty string
+    if (name === "no_of_inner_box") {
+      // Only set if value is a valid number or empty
+      if (value === "" || !isNaN(value)) {
+        setNewBatch({ ...newBatch, [name]: value });
+      }
+    } else {
+      // Handle other fields normally
+      setNewBatch({ ...newBatch, [name]: value });
+    }
+    
+    // If company_id changes, fetch products and check packing_enabled
+    if (name === "company_id" && value) {
+      console.log("Company selected, fetching products for company_id:", value);
+      fetchProductsForCompany(value);
+      
+      // Also fetch company details to check packing_enabled
+      fetchCompanyDetails(value);
+      
+      // Reset product and scheme selection
+      setNewBatch(prev => ({
+        ...prev,
+        company_id: value,
+        product_id: "",
+        scheme_id: "",
+        no_of_inner_box: "", // Reset this field too
+      }));
+    } else if (name === "company_id" && !value) {
+      // If company is deselected, clear products and schemes
+      setProducts([]);
+      setSchemes([]);
+      setPackingEnabled(false); // Reset packing enabled state
+    }
   };
 
   const handleExtraFieldChange = (e) => {
@@ -129,6 +247,8 @@ const BatchesPage = () => {
       mfg_date: !newBatch.mfg_date,
       product_id: !newBatch.product_id,
       mrp: !newBatch.mrp,
+      company_id: userData.role === "admin" && !newBatch.company_id,
+      no_of_inner_box: packingEnabled && !newBatch.no_of_inner_box,
     };
     setInputError(errors);
     // If any error is true, return false
@@ -137,7 +257,9 @@ const BatchesPage = () => {
       errors.exp_date ||
       errors.mfg_date ||
       errors.product_id ||
-      errors.mrp
+      errors.mrp ||
+      errors.company_id ||
+      errors.no_of_inner_box
     );
   };
 
@@ -146,7 +268,7 @@ const BatchesPage = () => {
     setIsSubmitting(true);
     setDuplicateBatchError(""); 
     try {
-      // Create a copy of the batch data to properly handle the scheme_id
+      // Create a copy of the batch data to properly handle integer fields
       const batchData = { ...newBatch };
       
       // Ensure scheme_id is properly handled (null if empty, otherwise convert to integer)
@@ -156,14 +278,38 @@ const BatchesPage = () => {
         batchData.scheme_id = parseInt(batchData.scheme_id); // Ensure it's an integer
       }
       
+      // Ensure no_of_inner_box is properly handled as an integer when packingEnabled
+      if (packingEnabled) {
+        if (batchData.no_of_inner_box === "") {
+          batchData.no_of_inner_box = null; // Use null for empty values
+        } else {
+          batchData.no_of_inner_box = parseInt(batchData.no_of_inner_box); // Ensure it's an integer
+        }
+      } else {
+        // If packing not enabled, don't send this field
+        delete batchData.no_of_inner_box;
+      }
+      
       if (editMode) {
         // Update existing batch
-        console.log("Batch details being sent for update:", batchData);
-        await axios.put(`/update-batch/${editBatchId}`, batchData);
+        // Important: backend rejects updates that include immutable fields like company_id or plant_id.
+        // Remove those keys before sending the update payload.
+        const updateData = { ...batchData };
+        if (updateData.hasOwnProperty('company_id')) delete updateData.company_id;
+        if (updateData.hasOwnProperty('plant_id')) delete updateData.plant_id;
+
+        console.log("Batch details being sent for update:", updateData);
+        console.log("Edit batch data (JSON):", JSON.stringify(updateData, null, 2));
+        await axios.put(`/update-batch/${editBatchId}`, updateData);
         alert("Batch Updated Successfully");
       } else {
         // Create new batch
         console.log("Batch details being sent to backend:", batchData);
+        console.log("Add batch data (JSON):", JSON.stringify(batchData, null, 2));
+        console.log("User role:", userData.role);
+        console.log("Selected company ID:", batchData.company_id);
+        console.log("Selected product ID:", batchData.product_id);
+        console.log("Selected scheme ID:", batchData.scheme_id);
         await axios.post("/add-batch", batchData);
         alert("Batch Added Successfully");
       }
@@ -177,6 +323,8 @@ const BatchesPage = () => {
         extra_fields: {},
         scheme_id: "",
         mrp: "",
+        company_id: userData.role === "admin" ? "" : userData.companyId || "",
+        no_of_inner_box: "", // Reset inner box count too
       });
       setInputError({
         batch_number: false,
@@ -184,6 +332,8 @@ const BatchesPage = () => {
         mfg_date: false,
         product_id: false,
         mrp: false,
+        company_id: false,
+        no_of_inner_box: false,
       });
       setEditMode(false);
       setEditBatchId(null);
@@ -235,6 +385,14 @@ const BatchesPage = () => {
       const response = await axios.get(`/batch/${batchId}`);
       const batchData = response.data;
       
+      // Check packing_enabled for the company
+      let isPacking = false;
+      if (userData.role === "admin" && batchData.company_id) {
+        isPacking = await fetchCompanyDetails(batchData.company_id);
+      } else if (userData.companyId) {
+        isPacking = await fetchCompanyDetails(userData.companyId);
+      }
+      
       // Set the batch data in the form
       setNewBatch({
         batch_number: batchData.batch_number || "",
@@ -244,6 +402,11 @@ const BatchesPage = () => {
         extra_fields: batchData.extra_fields || {},
         scheme_id: batchData.schemes && batchData.schemes.length > 0 ? batchData.schemes[0].id : "",
         mrp: batchData.mrp || "",
+        company_id: batchData.company_id || "",
+        // Convert no_of_inner_box to string for the input field, or use empty string if null/undefined
+        no_of_inner_box: batchData.no_of_inner_box !== null && batchData.no_of_inner_box !== undefined 
+                         ? String(batchData.no_of_inner_box) 
+                         : "",
       });
       
       // Set edit mode
@@ -357,10 +520,18 @@ const BatchesPage = () => {
                     extra_fields: {},
                     scheme_id: "",
                     mrp: "",
+                    company_id: "",
+                    no_of_inner_box: "",
                   });
                   setEditMode(false);
                   setEditBatchId(null);
                   setShowModal(true);
+                  // If not admin, check company's packing_enabled
+                  if (userData.role !== "admin" && userData.companyId) {
+                    fetchCompanyDetails(userData.companyId);
+                  } else {
+                    setPackingEnabled(false);
+                  }
                 }}
                 pageCount={Math.ceil(filteredBatches.length / batchesPerPage)}
                 onPageChange={handlePageClick}
@@ -406,158 +577,331 @@ const BatchesPage = () => {
                   {editMode ? "Edit Batch" : "Add New Batch"}
                 </h2>
 
-                {/* Input fields arranged in 2 columns */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Batch Number
-                    </label>
-                    <input
-                      type="text"
-                      name="batch_number"
-                      value={newBatch.batch_number}
-                      onChange={handleInputChange}
-                      maxLength={10}
-                      className={`w-full p-2 border rounded ${
-                        inputError.batch_number || duplicateBatchError
-                          ? "border-red-500"
-                          : "border-gray-300"
-                      }`}
-                    />
-                    {inputError.batch_number && (
-                      <span className="text-red-500 text-xs">
-                        {!newBatch.batch_number
-                          ? "Required"
-                          : "Max 10 characters allowed"}
-                      </span>
-                    )}
-                    {duplicateBatchError && (
-                      <span className="text-red-500 text-xs">
-                        {duplicateBatchError}
-                      </span>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Max Retail Price
-                    </label>
-                    <input
-                      type="number"
-                      name="mrp"
-                      value={newBatch.mrp}
-                      onChange={handleInputChange}
-                      className={`w-full p-2 border rounded ${
-                        inputError.mrp ? "border-red-500" : "border-gray-300"
-                      }`}
-                    />
-                    {inputError.mrp && (
-                      <span className="text-red-500 text-xs">Required</span>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Expiration Date
-                    </label>
-                    <input
-                      type="date"
-                      name="exp_date"
-                      value={newBatch.exp_date}
-                      onChange={handleInputChange}
-                      className={`w-full p-2 border rounded ${
-                        inputError.exp_date
-                          ? "border-red-500"
-                          : "border-gray-300"
-                      }`}
-                    />
-                    {inputError.exp_date && (
-                      <span className="text-red-500 text-xs">Required</span>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Manufacturing Date
-                    </label>
-                    <input
-                      type="date"
-                      name="mfg_date"
-                      value={newBatch.mfg_date}
-                      onChange={handleInputChange}
-                      className={`w-full p-2 border rounded ${
-                        inputError.mfg_date
-                          ? "border-red-500"
-                          : "border-gray-300"
-                      }`}
-                    />
-                    {inputError.mfg_date && (
-                      <span className="text-red-500 text-xs">Required</span>
-                    )}
-                  </div>
-
-                  {/* Product & Cashback Fields in One Row */}
-                  <div>
-                    <label className="block text-sm font-medium mb-1">
-                      Product
-                    </label>
-                    <select
-                      name="product_id"
-                      value={newBatch.product_id}
-                      onChange={handleInputChange}
-                      className={`w-full p-2 border rounded ${
-                        inputError.product_id
-                          ? "border-red-500"
-                          : "border-gray-300"
-                      }`}
-                    >
-                      <option value="">Select Product</option>
-                      {products.map((product) => (
-                        <option key={product.id} value={product.id}>
-                          {product.product_alias}
-                        </option>
-                      ))}
-                    </select>
-                    {inputError.product_id && (
-                      <span className="text-red-500 text-xs">Required</span>
-                    )}
-                  </div>
-                  {companyCashbackEnabled && (
+                {/* Input fields arranged in 2 columns. Show only 4 editable fields when editing a batch. */}
+                {editMode ? (
+                  <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium mb-1">
-                        Scheme
-                      </label>
-                      <select
-                        name="scheme_id"
-                        value={newBatch.scheme_id}
-                        onChange={handleInputChange}
-                        className="w-full p-2 border rounded border-gray-300"
-                      >
-                        <option value="">Select Scheme</option>
-                        {schemes.map((scheme) => (
-                          <option key={scheme.id} value={scheme.id}>
-                            {scheme.scheme_name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                </div>
-
-                {/* Render extra fields dynamically */}
-                <div className="grid grid-cols-2 gap-4 mt-4">
-                  {extraFields.map((field, index) => (
-                    <div key={index}>
-                      <label className="block text-sm font-medium mb-1">
-                        {field}
+                        Batch Number
                       </label>
                       <input
                         type="text"
-                        name={field}
-                        value={newBatch.extra_fields[field] || ""}
-                        onChange={handleExtraFieldChange}
-                        className="w-full p-2 border rounded border-gray-300"
+                        name="batch_number"
+                        value={newBatch.batch_number}
+                        onChange={handleInputChange}
+                        maxLength={10}
+                        className={`w-full p-2 border rounded ${
+                          inputError.batch_number || duplicateBatchError
+                            ? "border-red-500"
+                            : "border-gray-300"
+                        }`}
                       />
+                      {inputError.batch_number && (
+                        <span className="text-red-500 text-xs">
+                          {!newBatch.batch_number
+                            ? "Required"
+                            : "Max 10 characters allowed"}
+                        </span>
+                      )}
+                      {duplicateBatchError && (
+                        <span className="text-red-500 text-xs">
+                          {duplicateBatchError}
+                        </span>
+                      )}
                     </div>
-                  ))}
-                </div>
+
+                    <div>
+                      <label className="block text-sm font-medium mb-1">
+                        Max Retail Price
+                      </label>
+                      <input
+                        type="number"
+                        name="mrp"
+                        value={newBatch.mrp}
+                        onChange={handleInputChange}
+                        className={`w-full p-2 border rounded ${
+                          inputError.mrp ? "border-red-500" : "border-gray-300"
+                        }`}
+                      />
+                      {inputError.mrp && (
+                        <span className="text-red-500 text-xs">Required</span>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium mb-1">
+                        Expiration Date
+                      </label>
+                      <input
+                        type="date"
+                        name="exp_date"
+                        value={newBatch.exp_date}
+                        onChange={handleInputChange}
+                        className={`w-full p-2 border rounded ${
+                          inputError.exp_date
+                            ? "border-red-500"
+                            : "border-gray-300"
+                        }`}
+                      />
+                      {inputError.exp_date && (
+                        <span className="text-red-500 text-xs">Required</span>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium mb-1">
+                        Manufacturing Date
+                      </label>
+                      <input
+                        type="date"
+                        name="mfg_date"
+                        value={newBatch.mfg_date}
+                        onChange={handleInputChange}
+                        className={`w-full p-2 border rounded ${
+                          inputError.mfg_date
+                            ? "border-red-500"
+                            : "border-gray-300"
+                        }`}
+                      />
+                      {inputError.mfg_date && (
+                        <span className="text-red-500 text-xs">Required</span>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-1">
+                        Batch Number
+                      </label>
+                      <input
+                        type="text"
+                        name="batch_number"
+                        value={newBatch.batch_number}
+                        onChange={handleInputChange}
+                        maxLength={10}
+                        className={`w-full p-2 border rounded ${
+                          inputError.batch_number || duplicateBatchError
+                            ? "border-red-500"
+                            : "border-gray-300"
+                        }`}
+                      />
+                      {inputError.batch_number && (
+                        <span className="text-red-500 text-xs">
+                          {!newBatch.batch_number
+                            ? "Required"
+                            : "Max 10 characters allowed"}
+                        </span>
+                      )}
+                      {duplicateBatchError && (
+                        <span className="text-red-500 text-xs">
+                          {duplicateBatchError}
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">
+                        Max Retail Price
+                      </label>
+                      <input
+                        type="number"
+                        name="mrp"
+                        value={newBatch.mrp}
+                        onChange={handleInputChange}
+                        className={`w-full p-2 border rounded ${
+                          inputError.mrp ? "border-red-500" : "border-gray-300"
+                        }`}
+                      />
+                      {inputError.mrp && (
+                        <span className="text-red-500 text-xs">Required</span>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">
+                        Expiration Date
+                      </label>
+                      <input
+                        type="date"
+                        name="exp_date"
+                        value={newBatch.exp_date}
+                        onChange={handleInputChange}
+                        className={`w-full p-2 border rounded ${
+                          inputError.exp_date
+                            ? "border-red-500"
+                            : "border-gray-300"
+                        }`}
+                      />
+                      {inputError.exp_date && (
+                        <span className="text-red-500 text-xs">Required</span>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-1">
+                        Manufacturing Date
+                      </label>
+                      <input
+                        type="date"
+                        name="mfg_date"
+                        value={newBatch.mfg_date}
+                        onChange={handleInputChange}
+                        className={`w-full p-2 border rounded ${
+                          inputError.mfg_date
+                            ? "border-red-500"
+                            : "border-gray-300"
+                        }`}
+                      />
+                      {inputError.mfg_date && (
+                        <span className="text-red-500 text-xs">Required</span>
+                      )}
+                    </div>
+
+                    {/* Company Dropdown for Admin Users */}
+                    {userData.role === "admin" && (
+                      <div>
+                        <label className="block text-sm font-medium mb-1">
+                          Company
+                        </label>
+                        <select
+                          name="company_id"
+                          value={newBatch.company_id}
+                          onChange={handleInputChange}
+                          className={`w-full p-2 border rounded ${
+                            inputError.company_id
+                              ? "border-red-500"
+                              : "border-gray-300"
+                          }`}
+                        >
+                          <option value="">Select Company</option>
+                          {console.log("Companies in dropdown render:", companies)}
+                            {companies && companies.map((company) => {
+                              console.log("Company item:", company);
+                              const companyId = company.id || company._id;
+                              const companyName = company.company_name || company.name;
+                              return (
+                                <option key={companyId} value={companyId}>
+                                  {companyName}
+                                </option>
+                              );
+                            })}
+                        </select>
+                        {inputError.company_id && (
+                          <span className="text-red-500 text-xs">Required</span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Product & Cashback Fields in One Row */}
+                    <div>
+                      <label className="block text-sm font-medium mb-1">
+                        Product
+                      </label>
+                      <select
+                        name="product_id"
+                        value={newBatch.product_id}
+                        onChange={handleInputChange}
+                        className={`w-full p-2 border rounded ${
+                          inputError.product_id
+                            ? "border-red-500"
+                            : "border-gray-300"
+                        }`}
+                      >
+                        <option value="">
+                          {userData.role === "admin" && !newBatch.company_id 
+                            ? "Select a company first" 
+                            : "Select Product"}
+                        </option>
+                        {products.map((product) => {
+                          const productId = product.id || product._id;
+                          return (
+                            <option key={productId} value={productId}>
+                              {product.product_alias}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      {inputError.product_id && (
+                        <span className="text-red-500 text-xs">Required</span>
+                      )}
+                    </div>
+                    {companyCashbackEnabled && (
+                      <div>
+                        <label className="block text-sm font-medium mb-1">
+                          Scheme
+                        </label>
+                        <select
+                          name="scheme_id"
+                          value={newBatch.scheme_id}
+                          onChange={handleInputChange}
+                          className="w-full p-2 border rounded border-gray-300"
+                        >
+                          <option value="">
+                            {userData.role === "admin" && !newBatch.company_id 
+                              ? "Select a company first" 
+                              : "Select Scheme"}
+                          </option>
+                          {schemes.map((scheme) => {
+                            const schemeId = scheme.id || scheme._id;
+                            return (
+                              <option key={schemeId} value={schemeId}>
+                                {scheme.scheme_name}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Render extra fields dynamically (only when adding a new batch) */}
+                {!editMode && (
+                  <div className="grid grid-cols-2 gap-4 mt-4">
+                    {extraFields.map((field, index) => (
+                      <div key={index}>
+                        <label className="block text-sm font-medium mb-1">
+                          {field}
+                        </label>
+                        <input
+                          type="text"
+                          name={field}
+                          value={newBatch.extra_fields[field] || ""}
+                          onChange={handleExtraFieldChange}
+                          className="w-full p-2 border rounded border-gray-300"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Add Number of Inner Pack field if packing is enabled (only when adding) */}
+                {!editMode && packingEnabled && (
+                  <div className="col-span-2 mt-4">
+                    <label className="block text-sm font-medium mb-1">
+                      Number of Inner Pack <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      name="no_of_inner_box"
+                      value={newBatch.no_of_inner_box}
+                      onChange={handleInputChange}
+                      min="1"
+                      step="1" // Ensure only whole numbers
+                      onKeyPress={(e) => {
+                        // Allow only digits and navigation keys
+                        if (!/[0-9]/.test(e.key) && e.key !== 'Backspace' && e.key !== 'Delete' && 
+                            e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'Tab') {
+                          e.preventDefault();
+                        }
+                      }}
+                      className={`w-full p-2 border rounded ${
+                        inputError.no_of_inner_box ? "border-red-500" : "border-gray-300"
+                      }`}
+                    />
+                    {inputError.no_of_inner_box && (
+                      <span className="text-red-500 text-xs">Required for this company</span>
+                    )}
+                  </div>
+                )}
 
                 {/* Add Batch Button */}
                 <div className="mt-6">

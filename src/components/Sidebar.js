@@ -65,6 +65,12 @@ const Sidebar = ({ userData, companyCashbackEnabled }) => {
               <FiCalendar className="inline-block mr-2" /> Batches
             </Link>
             <Link
+              to="/generate-qr"
+              className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
+            >
+              <FiList className="inline-block mr-2" /> Generate QR
+            </Link>
+            <Link
               to="/companies"
               className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
             >

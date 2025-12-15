@@ -2,6 +2,8 @@
   "name": "track_n_trace_frontend",
   "version": "0.1.0",
   "private": true,
+  "main": "electron-main.js",
+  "homepage": ".",
   "dependencies": {
     "@emotion/react": "^11.13.3",
     "@emotion/styled": "^11.13.0",
@@ -39,7 +41,13 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build",
+    "start:react": "react-scripts start",
+    "electron:dev": "concurrently \"cross-env BROWSER=none npm run start:react\" \"wait-on http://localhost:3000 && electron .\"",
+    "build": "react-scripts build && node verify-build.js",
+    "build:production": "REACT_APP_BACKEND_URL=https://test.richi.life react-scripts build && node verify-build.js",
+    "dist": "cross-env NODE_ENV=production npm run build && electron-builder",
+    "dist:mac": "cross-env NODE_ENV=production npm run build && electron-builder --mac",
+    "dist:win": "cross-env NODE_ENV=production npm run build && electron-builder --win",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
@@ -61,14 +69,44 @@
       "last 1 safari version"
     ]
   },
+  "build": {
+    "appId": "com.realntested.trackntrace",
+    "productName": "Track n Trace",
+    "files": [
+      "build/**/*",
+      "electron-main.js",
+      "preload.js",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "directories": {
+      "buildResources": "assets"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
+  },
   "devDependencies": {
     "@babel/preset-env": "^7.28.0",
     "@babel/preset-react": "^7.27.1",
     "@testing-library/jest-dom": "^6.6.4",
     "@testing-library/react": "^16.3.0",
     "babel-jest": "^30.0.5",
+    "concurrently": "^9.2.1",
+    "cross-env": "^7.0.3",
     "cypress": "^14.5.3",
+    "electron": "^31.7.7",
+    "electron-builder": "^24.13.3",
     "jest": "^27.5.1",
-    "tailwindcss": "^3.4.10"
+    "tailwindcss": "^3.4.10",
+    "wait-on": "^8.0.5"
   }
 }

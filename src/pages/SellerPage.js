@@ -89,6 +89,7 @@ const SellerPage = () => {
         seller.mobile.toLowerCase().includes(searchTerm.toLowerCase())
     );
     setFilteredSellers(filtered);
+    setCurrentPage(0); // Reset to first page when search term changes
   }, [searchTerm, sellers]);
 
   // Handle pagination
