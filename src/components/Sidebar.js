@@ -1,5 +1,5 @@
 // src/components/Sidebar.js
-import React from "react";
+import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import {
   FiHome,
@@ -13,12 +13,15 @@ import {
   FiBarChart2,
   FiGift,
   FiArrowRight,
+  FiChevronDown,
+  FiChevronUp,
 } from "react-icons/fi";
 import { useNavigate } from "react-router-dom";
 import axios from "../utils/axiosConfig";
 
-const Sidebar = ({ userData, companyCashbackEnabled }) => {
+const Sidebar = ({ userData, companyCashbackEnabled, companyTracingEnabled, companyPackingEnabled }) => {
   const navigate = useNavigate();
+  const [isReportOpen, setIsReportOpen] = useState(false);
 
   const handleLogout = async () => {
     try {
@@ -70,6 +73,22 @@ const Sidebar = ({ userData, companyCashbackEnabled }) => {
             >
               <FiList className="inline-block mr-2" /> Generate QR
             </Link>
+            {companyTracingEnabled && (
+              <>
+                <Link
+                  to="/indent"
+                  className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
+                >
+                  <FiList className="inline-block mr-2" /> Indent
+                </Link>
+                <Link
+                  to="/shipment"
+                  className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
+                >
+                  <FiList className="inline-block mr-2" /> Shipment
+                </Link>
+              </>
+            )}
             <Link
               to="/companies"
               className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
@@ -90,12 +109,6 @@ const Sidebar = ({ userData, companyCashbackEnabled }) => {
                 >
                   <FiUserX className="inline-block mr-2" /> Seller
                 </Link>
-                <Link
-                  to="/seller-report"
-                  className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
-                >
-                  <FiUserX className="inline-block mr-2" /> Seller Report
-                </Link>
               </>
             )}
             <Link
@@ -104,20 +117,20 @@ const Sidebar = ({ userData, companyCashbackEnabled }) => {
             >
               <FiSettings className="inline-block mr-2" /> Settings
             </Link>
+            {companyCashbackEnabled && (
+              <Link
+                to="/report"
+                className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
+              >
+                <FiBarChart2 className="inline-block mr-2" /> Report
+              </Link>
+            )}
             {/* <Link
               to="/analytics"
               className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
             >
               <FiBarChart2 className="inline-block mr-2" /> Analytics
             </Link> */}
-            {companyCashbackEnabled && (
-              <Link
-                to="/export"
-                className="block py-2.5 px-4 rounded transition duration-200 hover:bg-yellow-600 hover:text-white font-bold text-lg mt-4"
-              >
-                <FiArrowRight className="inline-block mr-2" /> Export
-              </Link>
-            )}
           </>
         );
       case "master":
@@ -147,26 +160,44 @@ const Sidebar = ({ userData, companyCashbackEnabled }) => {
             >
               <FiCalendar className="inline-block mr-2" /> Batches
             </Link>
-            {companyCashbackEnabled && (
-              <Link
-                to="/export"
-                className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
-              >
-                <FiArrowRight className="inline-block mr-2" /> Export
-              </Link>
-            )}
             <Link
               to="/generate-qr"
               className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
             >
               <FiList className="inline-block mr-2" /> Generate QR
             </Link>
-            <Link
-              to="/scheme"
-              className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
-            >
-              <FiGift className="inline-block mr-2" /> Scheme
-            </Link>
+            {companyPackingEnabled && (
+              <Link
+                to="/pack"
+                className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
+              >
+                <FiPackage className="inline-block mr-2" /> Pack
+              </Link>
+            )}
+            {companyTracingEnabled && (
+              <>
+                <Link
+                  to="/indent"
+                  className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
+                >
+                  <FiList className="inline-block mr-2" /> Indent
+                </Link>
+                <Link
+                  to="/shipment"
+                  className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
+                >
+                  <FiList className="inline-block mr-2" /> Shipment
+                </Link>
+              </>
+            )}
+            {companyCashbackEnabled && (
+              <Link
+                to="/scheme"
+                className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
+              >
+                <FiGift className="inline-block mr-2" /> Scheme
+              </Link>
+            )}
             <Link
               to="/manufacturing-plants"
               className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
@@ -181,12 +212,6 @@ const Sidebar = ({ userData, companyCashbackEnabled }) => {
                 >
                   <FiUserX className="inline-block mr-2" /> Seller
                 </Link>
-                <Link
-                  to="/seller-report"
-                  className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
-                >
-                  <FiUserX className="inline-block mr-2" /> Seller Report
-                </Link>
               </>
             )}
             <Link
@@ -195,6 +220,47 @@ const Sidebar = ({ userData, companyCashbackEnabled }) => {
             >
               <FiSettings className="inline-block mr-2" /> Settings
             </Link>
+            {companyCashbackEnabled && (
+              <div>
+                <button
+                  onClick={() => setIsReportOpen(!isReportOpen)}
+                  className="w-full text-left py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white flex items-center justify-between"
+                >
+                  <span>
+                    <FiBarChart2 className="inline-block mr-2" /> Report
+                  </span>
+                  {isReportOpen ? <FiChevronUp /> : <FiChevronDown />}
+                </button>
+                {isReportOpen && (
+                  <div className="ml-6 mt-1">
+                    <Link
+                      to="/stocks-report"
+                      className="block py-2 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white text-sm"
+                    >
+                      Stocks Report
+                    </Link>
+                    <Link
+                      to="/cashback-report"
+                      className="block py-2 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white text-sm"
+                    >
+                      Cashback Report
+                    </Link>
+                    <Link
+                      to="/seller-report"
+                      className="block py-2 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white text-sm"
+                    >
+                      Seller Report
+                    </Link>
+                    <Link
+                      to="/scheme-report"
+                      className="block py-2 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white text-sm"
+                    >
+                      Scheme Report
+                    </Link>
+                  </div>
+                )}
+              </div>
+            )}
             {/* <Link
               to="/analytics"
               className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
@@ -236,12 +302,65 @@ const Sidebar = ({ userData, companyCashbackEnabled }) => {
             >
               <FiList className="inline-block mr-2" /> Generate QR
             </Link>
+            {companyPackingEnabled && (
+              <Link
+                to="/pack"
+                className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
+              >
+                <FiPackage className="inline-block mr-2" /> Pack
+              </Link>
+            )}
+            {companyTracingEnabled && (
+              <>
+                <Link
+                  to="/indent"
+                  className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
+                >
+                  <FiList className="inline-block mr-2" /> Indent
+                </Link>
+                <Link
+                  to="/shipment"
+                  className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
+                >
+                  <FiList className="inline-block mr-2" /> Shipment
+                </Link>
+              </>
+            )}
             <Link
               to="/settings"
               className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
             >
               <FiSettings className="inline-block mr-2" /> Settings
             </Link>
+            {companyCashbackEnabled && (
+              <div>
+                <button
+                  onClick={() => setIsReportOpen(!isReportOpen)}
+                  className="w-full text-left py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white flex items-center justify-between"
+                >
+                  <span>
+                    <FiBarChart2 className="inline-block mr-2" /> Report
+                  </span>
+                  {isReportOpen ? <FiChevronUp /> : <FiChevronDown />}
+                </button>
+                {isReportOpen && (
+                  <div className="ml-6 mt-1">
+                    <Link
+                      to="/stocks-report"
+                      className="block py-2 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white text-sm"
+                    >
+                      Stocks Report
+                    </Link>
+                    <Link
+                      to="/cashback-report"
+                      className="block py-2 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white text-sm"
+                    >
+                      Cashback Report
+                    </Link>
+                  </div>
+                )}
+              </div>
+            )}
           </>
         );
       case "staff":
@@ -277,12 +396,57 @@ const Sidebar = ({ userData, companyCashbackEnabled }) => {
             >
               <FiList className="inline-block mr-2" /> Generate QR
             </Link>
+            {companyPackingEnabled && (
+              <Link
+                to="/pack"
+                className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
+              >
+                <FiPackage className="inline-block mr-2" /> Pack
+              </Link>
+            )}
+            {companyTracingEnabled && (
+              <Link
+                to="/shipment"
+                className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
+              >
+                <FiList className="inline-block mr-2" /> Shipment
+              </Link>
+            )}
             <Link
               to="/settings"
               className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
             >
               <FiSettings className="inline-block mr-2" /> Settings
             </Link>
+            {companyCashbackEnabled && (
+              <div>
+                <button
+                  onClick={() => setIsReportOpen(!isReportOpen)}
+                  className="w-full text-left py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white flex items-center justify-between"
+                >
+                  <span>
+                    <FiBarChart2 className="inline-block mr-2" /> Report
+                  </span>
+                  {isReportOpen ? <FiChevronUp /> : <FiChevronDown />}
+                </button>
+                {isReportOpen && (
+                  <div className="ml-6 mt-1">
+                    <Link
+                      to="/stocks-report"
+                      className="block py-2 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white text-sm"
+                    >
+                      Stocks Report
+                    </Link>
+                    <Link
+                      to="/cashback-report"
+                      className="block py-2 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white text-sm"
+                    >
+                      Cashback Report
+                    </Link>
+                  </div>
+                )}
+              </div>
+            )}
           </>
         );
       case "salesman":
@@ -302,6 +466,14 @@ const Sidebar = ({ userData, companyCashbackEnabled }) => {
                 <FiUserX className="inline-block mr-2" /> Seller
               </Link>
             )}
+            {companyTracingEnabled && (
+              <Link
+                to="/indent"
+                className="block py-2.5 px-4 rounded transition duration-200 hover:bg-teal-900 hover:text-white"
+              >
+                <FiList className="inline-block mr-2" /> Indent
+              </Link>
+            )}
           </>
         );
       default:
@@ -310,7 +482,7 @@ const Sidebar = ({ userData, companyCashbackEnabled }) => {
   };
 
   return (
-    <div className="bg-teal-800 text-white w-64 space-y-6 py-14 px-2">
+    <div className="bg-teal-800 text-white w-64 space-y-6 py-14 px-2 h-screen overflow-y-auto">
       <h1 className="text-3xl font-bold text-center ">Real & Tested</h1>
       <nav>
         {renderLinks()}

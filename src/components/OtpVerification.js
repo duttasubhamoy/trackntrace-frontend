@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { BsFillShieldLockFill, BsTelephoneFill } from "react-icons/bs";
 import { CgSpinner } from "react-icons/cg";
 import OtpInput from "otp-input-react";
@@ -8,8 +8,10 @@ import "react-phone-input-2/lib/style.css";
 import { toast, Toaster } from "react-hot-toast";
 import axios from "../utils/axiosConfig";
 import BACKEND_URL from "../utils/env";
+import { useAuth } from "../context/AuthContext";
 
 const OtpVerification = ({ initialMobile = "" }) => {
+  const { refetchUserData } = useAuth();
   const [otp, setOtp] = useState("");
   const [ph, setPh] = useState("");
   const [wrongOtp, setWrongOtp] = useState(false);
@@ -101,6 +103,10 @@ const OtpVerification = ({ initialMobile = "" }) => {
 
       localStorage.setItem("accessToken", response.data.access_token);
       localStorage.setItem("refreshToken", response.data.refresh_token);
+      
+      // Refetch user data to update AuthContext
+      await refetchUserData();
+      
       navigate("/dashboard");
     } catch (error) {
       setWrongOtp(true);
@@ -192,6 +198,13 @@ const OtpVerification = ({ initialMobile = "" }) => {
                   )}
                   <span>Send code via SMS</span>
                 </button>
+                
+                {/* Link to Password Login */}
+                <div className="text-center mt-2">
+                  <Link to="/login-password" className="text-sm text-gray-600 hover:text-orange-600">
+                    Login with Password instead
+                  </Link>
+                </div>
             </>
           )}
         </div>

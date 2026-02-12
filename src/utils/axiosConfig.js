@@ -11,6 +11,22 @@ const axiosInstance = axios.create({
   },
 });
 
+// Flag to prevent multiple simultaneous refresh requests
+let isRefreshing = false;
+let failedQueue = [];
+
+const processQueue = (error, token = null) => {
+  failedQueue.forEach((prom) => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+
+  failedQueue = [];
+};
+
 // Request interceptor to add JWT token to headers
 axiosInstance.interceptors.request.use(
   (config) => {
@@ -30,6 +46,8 @@ axiosInstance.interceptors.request.use(
 axiosInstance.interceptors.response.use(
   (response) => response,
   async (error) => {
+    const originalRequest = error.config;
+
     if (error.response) {
       const status = error.response.status;
       let data = error.response.data;
@@ -47,13 +65,69 @@ axiosInstance.interceptors.response.use(
         return Promise.reject(error); // Let the component handle this specific error
       }
 
-      // Handle unauthorized errors (e.g., redirect to login)
-      if (status === 401) {
-        console.log(
-          "Unauthorized access:",
-          parsedData.message || error.message
-        );
-        window.location.href = "/login"; // Redirect to login route
+      // Handle unauthorized errors (token expired) - attempt refresh
+      if (status === 401 && !originalRequest._retry) {
+        if (isRefreshing) {
+          // If already refreshing, queue this request
+          return new Promise((resolve, reject) => {
+            failedQueue.push({ resolve, reject });
+          })
+            .then((token) => {
+              originalRequest.headers["Authorization"] = "Bearer " + token;
+              return axiosInstance(originalRequest);
+            })
+            .catch((err) => {
+              return Promise.reject(err);
+            });
+        }
+
+        originalRequest._retry = true;
+        isRefreshing = true;
+
+        const refreshToken = localStorage.getItem("refreshToken");
+
+        if (!refreshToken) {
+          // No refresh token available, redirect to login
+          localStorage.clear();
+          window.location.href = "/login";
+          return Promise.reject(error);
+        }
+
+        try {
+          // Attempt to refresh the access token
+          const response = await axios.post(
+            `${BACKEND_URL}/refresh`,
+            {},
+            {
+              headers: {
+                Authorization: `Bearer ${refreshToken}`,
+              },
+            }
+          );
+
+          const newAccessToken = response.data.access_token;
+          localStorage.setItem("accessToken", newAccessToken);
+
+          // Update the authorization header
+          axiosInstance.defaults.headers.common["Authorization"] =
+            "Bearer " + newAccessToken;
+          originalRequest.headers["Authorization"] =
+            "Bearer " + newAccessToken;
+
+          // Process queued requests
+          processQueue(null, newAccessToken);
+          isRefreshing = false;
+
+          // Retry the original request
+          return axiosInstance(originalRequest);
+        } catch (refreshError) {
+          // Refresh token is invalid or expired
+          processQueue(refreshError, null);
+          isRefreshing = false;
+          localStorage.clear();
+          window.location.href = "/login";
+          return Promise.reject(refreshError);
+        }
       }
       // Handle forbidden errors (e.g., show alert)
       else if (status === 403) {
@@ -72,8 +146,13 @@ axiosInstance.interceptors.response.use(
       }
       // Handle other HTTP errors
       else {
-        console.error("HTTP error:", parsedData.message || error.message);
-        alert(parsedData.message || error.message);
+        console.error("HTTP error:", parsedData.message || parsedData.description || error.message);
+        // For specific status codes, let the component handle the error
+        if (status === 409) {
+          // Conflict errors (e.g., unit status issues) - don't show global alert
+          return Promise.reject(error);
+        }
+        alert(parsedData.message || parsedData.description || error.message);
       }
     } else {
       // Handle network errors

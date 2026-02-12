@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from "react";
-import Sidebar from "../components/Sidebar";
-import Header from "../components/Header";
 import { CgSpinner } from "react-icons/cg";
 import { useNavigate } from "react-router-dom";
 import axios from "../utils/axiosConfig";
-import { fetchCompanyCashbackStatus } from "../utils/companyUtils";
+import { useAuth } from "../context/AuthContext";
 import { ComposableMap, Geographies, Geography } from "react-simple-maps";
 import { scaleLinear } from "d3-scale";
 import { geoCentroid, geoPath } from "d3-geo";
@@ -127,14 +125,9 @@ const getBoundingBoxAndProjection = (features) => {
 };
 
 const AnalyticsPage = () => {
+  const { userData } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
-  const [userData, setUserData] = useState({
-    name: "",
-    role: "",
-    lastLogin: "",
-    companyName: "",
-  });
 
   const [selectedState, setSelectedState] = useState(null);
   const [selectedStateAnalytics, setSelectedStateAnalytics] = useState(null);
@@ -150,25 +143,10 @@ const AnalyticsPage = () => {
   });
 
   useEffect(() => {
-    const fetchUserData = async () => {
-      try {
-        const response = await axios.get("/protected");
-        const { name, role, last_login, company_name } = response.data;
-        setUserData({
-          name,
-          role,
-          lastLogin: last_login,
-          companyName: company_name,
-        });
-        setIsLoading(false);
-      } catch (error) {
-        console.error("Error fetching user data:", error);
-        navigate("/login");
-      }
-    };
-
-    fetchUserData();
-  }, [navigate]);
+    if (userData) {
+      setIsLoading(false);
+    }
+  }, [userData]);
 
   // ✅ Load districts for a state when clicked
   const loadDistrictsForState = async (stateName) => {
@@ -234,17 +212,13 @@ const AnalyticsPage = () => {
   };
 
   return (
-    <div className="flex bg-gray-100 min-h-screen">
-      <Sidebar userData={userData} />
-      <div className="flex-1">
-        {isLoading ? (
-          <div className="flex justify-center items-center h-full">
-            <CgSpinner className="animate-spin text-4xl" />
-          </div>
-        ) : (
-          <>
-            <Header userData={userData} />
-            <div className="p-6 relative">
+    <>
+      {isLoading ? (
+        <div className="flex justify-center items-center h-full">
+          <CgSpinner className="animate-spin text-4xl" />
+        </div>
+      ) : (
+        <div className="p-6 relative">
               <h2 className="text-2xl font-bold mb-4">
                 Analytics Dashboard - {selectedState || "India"}
               </h2>
@@ -414,10 +388,9 @@ const AnalyticsPage = () => {
                 )}
               </div>
             </div>
-          </>
-        )}
-      </div>
-    </div>
+
+      )}
+    </>
   );
 };
 

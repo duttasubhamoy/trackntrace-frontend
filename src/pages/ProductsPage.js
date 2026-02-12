@@ -1,25 +1,23 @@
 import React, { useState, useEffect } from "react";
 import Modal from "react-modal";
-import Sidebar from "../components/Sidebar";
-import Header from "../components/Header";
 import { CgSpinner } from "react-icons/cg";
 import { useNavigate } from "react-router-dom";
 import axios from "../utils/axiosConfig";
-import { fetchCompanyCashbackStatus } from "../utils/companyUtils";
-import TableWithSearchAndPagination from "../components/TableWithSearchAndPagination"; // Import the table component
+import { useAuth } from "../context/AuthContext";
+import TableWithSearchAndPagination from "../components/TableWithSearchAndPagination";
 
-Modal.setAppElement("#root"); // For accessibility
+Modal.setAppElement("#root");
 
 const ProductsPage = () => {
+  const { userData, companies } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [products, setProducts] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [filteredProducts, setFilteredProducts] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [variantMode, setVariantMode] = useState(false); // Added for variant creation
+  const [variantMode, setVariantMode] = useState(false);
   const [editProductId, setEditProductId] = useState(null);
-  const [companyCashbackEnabled, setCompanyCashbackEnabled] = useState(false);
   const [newProduct, setNewProduct] = useState({
     product_alias: "",
     name: "",
@@ -27,26 +25,20 @@ const ProductsPage = () => {
     unit: "",
     description: "",
     extra_fields: {},
-    technical_name: "", // <-- added
-    cautionary_symbol: "", // <-- added
-    antidote_statement: "", // <-- added
-    cir_reg_no: "", // <-- added for product registration
-    company_id: "", // <-- added for admin to select company
+    technical_name: "",
+    cautionary_symbol: "",
+    antidote_statement: "",
+    cir_reg_no: "",
+    company_id: "",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
-  const [productsPerPage] = useState(10); // Fixed number of products per page
+  const [productsPerPage] = useState(10);
   const [extraFields, setExtraFields] = useState({
     extra_field_products: [],
     extra_field_batch: [],
   });
   const navigate = useNavigate();
-  const [userData, setUserData] = useState({
-    name: "",
-    role: "",
-    lastLogin: "",
-    companyName: "",
-  });
   const [inputError, setInputError] = useState({
     product_alias: false,
     name: false,
@@ -54,67 +46,18 @@ const ProductsPage = () => {
     unit: false,
     company_id: false,
   });
-  const [companies, setCompanies] = useState([]);
 
   useEffect(() => {
-    const fetchUserData = async () => {
-      try {
-        const response = await axios.get("/protected");
-        const { name, role, last_login, company_name, company_id } =
-          response.data;
-        setUserData({
-          name,
-          role,
-          lastLogin: last_login,
-          companyName: company_name,
-        });
-        console.log("ProductsPage - User role set to:", role); // Debug log
-        if (role === "salesman") {
-          navigate("/dashboard");
-        }
-
-        // For admin users, company_id might be null - handle this case
-        if (company_id) {
-          // Only fetch company details if company_id exists
-          try {
-            const companyRes = await axios.get(`/company/${company_id}`);
-            setCompanyCashbackEnabled(companyRes.data.cashback_enabled);
-          } catch (companyError) {
-            console.error("Error fetching company data:", companyError);
-            // Don't navigate away, just set cashback to false as default
-            setCompanyCashbackEnabled(false);
-          }
-        } else {
-          // For admin users without company_id, set cashback to false
-          // You could also set it to true if you want admin to see all features
-          setCompanyCashbackEnabled(false);
-        }
-
-        // If user is admin, fetch all companies
-        if (role === "admin") {
-          try {
-            const companiesRes = await axios.get("/companies");
-            // Log the companies data to the console for debugging
-            console.log("Companies API Response:", companiesRes.data);
-            setCompanies(companiesRes.data);
-          } catch (error) {
-            console.error("Error fetching companies:", error);
-          }
-        }
-
-        fetchProducts();
-        fetchExtraFields(role); // Pass the user role
-      } catch (error) {
-        console.error("Error fetching user data:", error);
-        navigate("/login");
-      }
-    };
+    if (userData?.role === "salesman") {
+      navigate("/dashboard");
+      return;
+    }
 
     const fetchProducts = async () => {
       try {
         const response = await axios.get("/products");
         setProducts(response.data);
-        setFilteredProducts(response.data); // Initialize filtered products with all products
+        setFilteredProducts(response.data);
         setIsLoading(false);
       } catch (error) {
         console.error("Error fetching products:", error);
@@ -122,9 +65,8 @@ const ProductsPage = () => {
       }
     };
 
-    const fetchExtraFields = async (userRole) => {
-      // Skip this API call if user is admin
-      if (userRole === "admin") {
+    const fetchExtraFields = async () => {
+      if (userData?.role === "admin") {
         return;
       }
       
@@ -136,8 +78,11 @@ const ProductsPage = () => {
       }
     };
 
-    fetchUserData();
-  }, [navigate]);
+    if (userData) {
+      fetchProducts();
+      fetchExtraFields();
+    }
+  }, [navigate, userData]);
 
   // Handle search functionality
   useEffect(() => {
@@ -459,67 +404,63 @@ const ProductsPage = () => {
   ]);
 
   return (
-    <div className="flex bg-gray-100 min-h-screen">
-      <Sidebar userData={userData} companyCashbackEnabled={companyCashbackEnabled} />
-      <div className="flex-1">
-        {isLoading ? (
-          <div className="flex justify-center items-center h-full">
-            <CgSpinner className="animate-spin text-4xl" />
-          </div>
-        ) : (
-          <>
-            <Header userData={userData} />
-            <div className="p-6">
-              <TableWithSearchAndPagination
-                tableHeaders={tableHeaders}
-                tableRows={tableRows}
-                searchTerm={searchTerm}
-                setSearchTerm={setSearchTerm}
-                buttonText="Add Product"
-                onButtonClick={() => {
-                  setNewProduct({
-                    product_alias: "",
-                    name: "",
-                    quantity: "",
-                    unit: "",
-                    description: "",
-                    extra_fields: {},
-                    technical_name: "",
-                    cautionary_symbol: "",
-                    antidote_statement: "",
-                    cir_reg_no: "",
-                    company_id: "",
-                    video_file: null,
-                    image_file: null,
-                    pdf_file: null,
-                  });
-                  setEditMode(false);
-                  setVariantMode(false);
-                  setEditProductId(null);
-                  setShowModal(true);
-                }}
-                pageCount={Math.ceil(filteredProducts.length / productsPerPage)}
-                onPageChange={handlePageClick}
-                currentPage={currentPage}
-                userRole={userData.role}
-                onEditClick={handleEditButtonClick}
-                onDeleteRequest={handleDeleteProduct}
-                productsData={currentProducts}
-              />
+    <>
+      {isLoading ? (
+        <div className="flex justify-center items-center h-full">
+          <CgSpinner className="animate-spin text-4xl" />
+        </div>
+      ) : (
+        <div className="p-6">
+          <TableWithSearchAndPagination
+            tableHeaders={tableHeaders}
+            tableRows={tableRows}
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            buttonText="Add Product"
+            onButtonClick={() => {
+              setNewProduct({
+                product_alias: "",
+                name: "",
+                quantity: "",
+                unit: "",
+                description: "",
+                extra_fields: {},
+                technical_name: "",
+                cautionary_symbol: "",
+                antidote_statement: "",
+                cir_reg_no: "",
+                company_id: "",
+                video_file: null,
+                image_file: null,
+                pdf_file: null,
+              });
+              setEditMode(false);
+              setVariantMode(false);
+              setEditProductId(null);
+              setShowModal(true);
+            }}
+            pageCount={Math.ceil(filteredProducts.length / productsPerPage)}
+            onPageChange={handlePageClick}
+            currentPage={currentPage}
+            userRole={userData?.role}
+            onEditClick={handleEditButtonClick}
+            onDeleteRequest={handleDeleteProduct}
+            productsData={currentProducts}
+          />
 
-              <Modal
-                isOpen={showModal}
-                onRequestClose={() => {
-                  setShowModal(false);
-                  setEditMode(false);
-                  setVariantMode(false);
-                  setEditProductId(null);
-                }}
-                contentLabel={editMode ? "Edit Product" : "Add New Product"}
-                className="bg-white rounded shadow-lg w-1/2 mx-auto mt-10 relative"
-                overlayClassName="fixed inset-0 bg-black bg-opacity-50"
-              >
-                {/* Close Button */}
+          <Modal
+            isOpen={showModal}
+            onRequestClose={() => {
+              setShowModal(false);
+              setEditMode(false);
+              setVariantMode(false);
+              setEditProductId(null);
+            }}
+            contentLabel={editMode ? "Edit Product" : "Add New Product"}
+            className="bg-white rounded shadow-lg w-1/2 mx-auto mt-10 relative"
+            overlayClassName="fixed inset-0 bg-black bg-opacity-50"
+          >
+            {/* Close Button */}
                 <button
                   onClick={() => {
                     setShowModal(false);
@@ -550,7 +491,7 @@ const ProductsPage = () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium mb-1">
-                        Product Alias
+                        Product Alias <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="text"
@@ -569,7 +510,7 @@ const ProductsPage = () => {
                     </div>
                     <div>
                       <label className="block text-sm font-medium mb-1">
-                        Name
+                        Name <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="text"
@@ -586,7 +527,7 @@ const ProductsPage = () => {
                     </div>
                     <div>
                       <label className="block text-sm font-medium mb-1">
-                        Quantity
+                        Quantity <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="number"
@@ -605,7 +546,7 @@ const ProductsPage = () => {
                     </div>
                     <div>
                       <label className="block text-sm font-medium mb-1">
-                        Unit
+                        Unit <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="text"
@@ -636,7 +577,7 @@ const ProductsPage = () => {
                     {userData.role === "admin" && (
                       <div className="col-span-2">
                         <label className="block text-sm font-medium mb-1">
-                          Company
+                          Company <span className="text-red-500">*</span>
                         </label>
                         <select
                           name="company_id"
@@ -797,11 +738,9 @@ const ProductsPage = () => {
                   </div>
                 </div>
               </Modal>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+        </div>
+      )}
+    </>
   );
 };
 

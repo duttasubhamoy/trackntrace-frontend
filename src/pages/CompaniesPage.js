@@ -1,14 +1,13 @@
 import React, { useState, useEffect } from "react";
-import Sidebar from "../components/Sidebar";
-import Header from "../components/Header";
 import TableWithSearchAndPagination from "../components/TableWithSearchAndPagination";
 import { CgSpinner } from "react-icons/cg";
 import { useNavigate } from "react-router-dom";
 import Modal from "react-modal";
 import axios from "../utils/axiosConfig";
-import { fetchCompanyCashbackStatus } from "../utils/companyUtils";
+import { useAuth } from "../context/AuthContext";
 
 const CompaniesPage = () => {
+  const { userData, companies: authCompanies } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [companies, setCompanies] = useState([]);
   const [filteredCompanies, setFilteredCompanies] = useState([]);
@@ -18,7 +17,6 @@ const CompaniesPage = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const navigate = useNavigate();
   const [selectedCompany, setSelectedCompany] = useState(null);
-  const [companyCashbackEnabled, setCompanyCashbackEnabled] = useState(false);
   const [editCompanyData, setEditCompanyData] = useState({
     name: "",
     address: "",
@@ -39,12 +37,6 @@ const CompaniesPage = () => {
     // Extra fields for dynamic configuration
     extra_field_products: {},
     extra_field_batch: {},
-  });
-  const [userData, setUserData] = useState({
-    name: "",
-    role: "",
-    lastLogin: "",
-    companyName: "",
   });
   const [showModal, setShowModal] = useState(false);
   const [newCompany, setNewCompany] = useState({
@@ -69,57 +61,40 @@ const CompaniesPage = () => {
     extra_field_batch: {},
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showFeaturesModal, setShowFeaturesModal] = useState(false);
+  const [selectedCompanyForFeatures, setSelectedCompanyForFeatures] = useState(null);
+  const [featuresData, setFeaturesData] = useState({
+    cashback_enabled: false,
+    packing_enabled: false,
+    tracing_enabled: false,
+    salesman_tracking_enabled: false,
+    accounting_enabled: false,
+  });
 
   useEffect(() => {
     const fetchData = async () => {
+      if (!userData) return;
+      
+      // Ensure only admin can access this page
+      if (userData.role !== "admin") {
+        navigate("/login");
+        return;
+      }
+
       try {
-        // Fetch user data
-        const userRes = await axios.get("/protected");
-        const { name, role, last_login, company_name, company_id } =
-          userRes.data;
-        setUserData({
-          name,
-          role,
-          lastLogin: last_login,
-          companyName: company_name,
-        });
-
-        // Ensure only admin can access this page
-        if (role !== "admin") {
-          navigate("/login");
-          return;
-        }
-
-        // For admin users, company_id might be null - handle this case
-        if (company_id) {
-          // Only fetch company details if company_id exists
-          try {
-            const companyRes = await axios.get(`/company/${company_id}`);
-            setCompanyCashbackEnabled(companyRes.data.cashback_enabled);
-          } catch (companyError) {
-            console.error("Error fetching company data:", companyError);
-            // Don't navigate away, just set cashback to false as default
-            setCompanyCashbackEnabled(false);
-          }
-        } else {
-          // For admin users without company_id, set cashback to false
-          // You could also set it to true if you want admin to see all features
-          setCompanyCashbackEnabled(false);
-        }
-
         // Fetch companies data
         const companiesRes = await axios.get("/companies");
         setCompanies(companiesRes.data);
         setFilteredCompanies(companiesRes.data);
+        setIsLoading(false);
       } catch (error) {
-        console.error("Error fetching data:", error);
+        console.error("Error fetching companies:", error);
         navigate("/login");
       }
-      setIsLoading(false);
     };
 
     fetchData();
-  }, [navigate]);
+  }, [navigate, userData]);
 
   useEffect(() => {
     // Filter companies based on the search term
@@ -284,6 +259,54 @@ const CompaniesPage = () => {
       }
     };
 
+  const handleManageFeatures = (index) => {
+    const company = filteredCompanies[index];
+    setSelectedCompanyForFeatures(company);
+    setFeaturesData({
+      cashback_enabled: company.cashback_enabled || false,
+      packing_enabled: company.packing_enabled || false,
+      tracing_enabled: company.tracing_enabled || false,
+      salesman_tracking_enabled: company.salesman_tracking_enabled || false,
+      accounting_enabled: company.accounting_enabled || false,
+    });
+    setShowFeaturesModal(true);
+  };
+
+  const handleFeatureCheckboxChange = (e) => {
+    const { name, checked } = e.target;
+    setFeaturesData((prev) => ({
+      ...prev,
+      [name]: checked,
+    }));
+  };
+
+  const handleUpdateFeatures = async () => {
+    if (!selectedCompanyForFeatures) return;
+
+    try {
+      const response = await axios.put(
+        `/update-company-features/${selectedCompanyForFeatures.id}`,
+        featuresData
+      );
+      
+      alert(response.data.msg || "Company features updated successfully!");
+
+      // Update local state
+      const updatedCompanies = companies.map((company) =>
+        company.id === selectedCompanyForFeatures.id
+          ? { ...company, ...featuresData }
+          : company
+      );
+
+      setCompanies(updatedCompanies);
+      setFilteredCompanies(updatedCompanies);
+      setShowFeaturesModal(false);
+    } catch (error) {
+      console.error("Error updating company features:", error);
+      alert(error.response?.data?.msg || "Failed to update company features. Please try again.");
+    }
+  };
+
   // Updated Table Headers
   const tableHeaders = [
     "Name",
@@ -335,17 +358,13 @@ const CompaniesPage = () => {
   ]);
 
   return (
-    <div className="flex bg-gray-100 min-h-screen">
-      <Sidebar userData={userData} companyCashbackEnabled={companyCashbackEnabled} />
-      <div className="flex-1">
-        {isLoading ? (
-          <div className="flex justify-center items-center h-full">
-            <CgSpinner className="animate-spin text-4xl" />
-          </div>
-        ) : (
-          <>
-            <Header userData={userData} />
-            <div className="p-6">
+    <>
+      {isLoading ? (
+        <div className="flex justify-center items-center h-full">
+          <CgSpinner className="animate-spin text-4xl" />
+        </div>
+      ) : (
+        <div className="p-6">
               <TableWithSearchAndPagination
                 tableHeaders={tableHeaders}
                 tableRows={tableRows}
@@ -356,12 +375,119 @@ const CompaniesPage = () => {
                 pageCount={totalPages} // Correct page count
                 onPageChange={handlePageClick} // Update the page click handler
                 currentPage={currentPage} // Pass the current page
-                onEditButtonClick={handleEditCompany}
+                onEditClick={handleManageFeatures}
+                userRole={userData.role}
+                customActionButtons={{
+                  editLabel: "Manage Features",
+                  editColor: "blue",
+                }}
               />
             </div>
-          </>
+
         )}
-      </div>
+
+
+      {showFeaturesModal && (
+        <Modal
+          isOpen={showFeaturesModal}
+          onRequestClose={() => setShowFeaturesModal(false)}
+          contentLabel="Manage Company Features"
+          className="bg-white p-6 rounded-xl shadow-xl w-[500px] mx-auto mt-20"
+          overlayClassName="fixed inset-0 bg-black bg-opacity-50 z-50 flex justify-center items-center"
+        >
+          <h2 className="text-xl font-bold mb-4 text-gray-900">Manage Company Features</h2>
+          <p className="text-sm text-gray-600 mb-4">
+            Company: <span className="font-semibold">{selectedCompanyForFeatures?.name}</span>
+          </p>
+          
+          <div className="space-y-3 mb-6">
+            <div className="flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
+              <input
+                type="checkbox"
+                id="feat_cashback_enabled"
+                name="cashback_enabled"
+                checked={featuresData.cashback_enabled}
+                onChange={handleFeatureCheckboxChange}
+                className="w-4 h-4 text-teal-600 mr-3"
+              />
+              <label htmlFor="feat_cashback_enabled" className="text-sm font-medium text-gray-700 cursor-pointer">
+                Cashback Enabled
+              </label>
+            </div>
+            
+            <div className="flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
+              <input
+                type="checkbox"
+                id="feat_packing_enabled"
+                name="packing_enabled"
+                checked={featuresData.packing_enabled}
+                onChange={handleFeatureCheckboxChange}
+                className="w-4 h-4 text-teal-600 mr-3"
+              />
+              <label htmlFor="feat_packing_enabled" className="text-sm font-medium text-gray-700 cursor-pointer">
+                Packing Enabled
+              </label>
+            </div>
+            
+            <div className="flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
+              <input
+                type="checkbox"
+                id="feat_tracing_enabled"
+                name="tracing_enabled"
+                checked={featuresData.tracing_enabled}
+                onChange={handleFeatureCheckboxChange}
+                className="w-4 h-4 text-teal-600 mr-3"
+              />
+              <label htmlFor="feat_tracing_enabled" className="text-sm font-medium text-gray-700 cursor-pointer">
+                Tracing Enabled
+              </label>
+            </div>
+            
+            <div className="flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
+              <input
+                type="checkbox"
+                id="feat_salesman_tracking_enabled"
+                name="salesman_tracking_enabled"
+                checked={featuresData.salesman_tracking_enabled}
+                onChange={handleFeatureCheckboxChange}
+                className="w-4 h-4 text-teal-600 mr-3"
+              />
+              <label htmlFor="feat_salesman_tracking_enabled" className="text-sm font-medium text-gray-700 cursor-pointer">
+                Salesman Tracking Enabled
+              </label>
+            </div>
+            
+            <div className="flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
+              <input
+                type="checkbox"
+                id="feat_accounting_enabled"
+                name="accounting_enabled"
+                checked={featuresData.accounting_enabled}
+                onChange={handleFeatureCheckboxChange}
+                className="w-4 h-4 text-teal-600 mr-3"
+              />
+              <label htmlFor="feat_accounting_enabled" className="text-sm font-medium text-gray-700 cursor-pointer">
+                Accounting Enabled
+              </label>
+            </div>
+          </div>
+          
+          <div className="flex justify-end">
+            <button
+              onClick={() => setShowFeaturesModal(false)}
+              className="mr-3 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleUpdateFeatures}
+              className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700"
+            >
+              Update Features
+            </button>
+          </div>
+        </Modal>
+      )}
 
       {showEditModal && (
         <Modal
@@ -868,7 +994,7 @@ const CompaniesPage = () => {
           </div>
         </Modal>
       )}
-    </div>
+    </>
   );
 };
 

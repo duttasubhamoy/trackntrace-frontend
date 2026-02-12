@@ -1,16 +1,15 @@
 import React, { useState, useEffect } from "react";
-import Sidebar from "../components/Sidebar";
-import Header from "../components/Header";
 import { CgSpinner } from "react-icons/cg";
 import { useNavigate } from "react-router-dom";
 import axios from "../utils/axiosConfig";
+import { useAuth } from "../context/AuthContext";
 import PrintQr from "../components/PrintQr";
 import "./print.css";
-import { fetchCompanyCashbackStatus } from "../utils/companyUtils";
 
 const URL_PREFIX = process.env.REACT_APP_QR_PREFIX || "";
 
 const GenerateQrPage = () => {
+  const { userData } = useAuth();
   // Dialog button loading states
   const [regenLoading, setRegenLoading] = useState(false);
   const [reprintQrLoading, setReprintQrLoading] = useState(false);
@@ -35,13 +34,6 @@ const GenerateQrPage = () => {
   const [filteredBatches, setFilteredBatches] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [datesIncluded, setDatesIncluded] = useState(true);
-  const [companyCashbackEnabled, setCompanyCashbackEnabled] = useState(false);
-  const [userData, setUserData] = useState({
-    name: "",
-    role: "",
-    lastLogin: "",
-    companyName: "",
-  });
   // Main page button loading states
   const [generateLoading, setGenerateLoading] = useState(false);
   const [printPdfLoading, setPrintPdfLoading] = useState(false);
@@ -72,52 +64,27 @@ const GenerateQrPage = () => {
   };
 
   useEffect(() => {
-    const fetchUserData = async () => {
+    const fetchBatches = async () => {
       try {
-        const response = await axios.get("/protected");
-        const { name, role, last_login, company_name, company_id } =
-          response.data;
-        setUserData({
-          name,
-          role,
-          lastLogin: last_login,
-          companyName: company_name,
-        });
-
-        // For admin users, company_id might be null - handle this case
-        if (company_id) {
-          // Only fetch company details if company_id exists
-          try {
-            const companyRes = await axios.get(`/company/${company_id}`);
-            setCompanyCashbackEnabled(companyRes.data.cashback_enabled);
-          } catch (companyError) {
-            console.error("Error fetching company data:", companyError);
-            // Don't navigate away, just set cashback to false as default
-            setCompanyCashbackEnabled(false);
-          }
-        } else {
-          // For admin users without company_id, set cashback to false
-          // You could also set it to true if you want admin to see all features
-          setCompanyCashbackEnabled(false);
-        }
-
-        if (role === "salesman") {
+        if (userData?.role === "salesman") {
           navigate("/dashboard");
+          return;
         }
 
-  const batchesResponse = await axios.get("/batches");
-  setBatches(batchesResponse.data);
-  // sort batches for dropdown display
-  setFilteredBatches(sortBatches(batchesResponse.data));
+        const batchesResponse = await axios.get("/batches");
+        setBatches(batchesResponse.data);
+        setFilteredBatches(sortBatches(batchesResponse.data));
         setIsLoading(false);
       } catch (error) {
-        console.error("Error fetching user data:", error);
-        navigate("/login");
+        console.error("Error fetching batches:", error);
+        setIsLoading(false);
       }
     };
 
-    fetchUserData();
-  }, [navigate]);
+    if (userData) {
+      fetchBatches();
+    }
+  }, [navigate, userData]);
 
   const handleBatchSearch = (e) => {
     const query = e.target.value;
@@ -422,406 +389,303 @@ const GenerateQrPage = () => {
   };
 
   return (
-    <div>
+    <>
       {isLoading ? (
         <div className="flex justify-center items-center w-full h-full bg-gray-100 min-h-screen">
           <CgSpinner className="animate-spin text-4xl" />
         </div>
       ) : (
-        <>
-          <div className="no-print flex bg-gray-100 min-h-screen">
-            <Sidebar userData={userData} companyCashbackEnabled={companyCashbackEnabled} />
-            <div className="flex-1">
-              <Header userData={userData} />
-              <div className="p-6">
-                <h1>Generate QR</h1>
-                <div className="flex justify-center bg-gray-100">
-                  <div className="w-full max-w-xs bg-white p-6 shadow-md rounded-lg">
-                    <label className="block mb-2 text-sm font-medium text-gray-700">
-                      Select Batch
-                    </label>
-                    <div className="relative w-full">
-                      <input
-                        type="text"
-                        value={batchDisplay}
-                        onChange={handleBatchSearch}
-                        onFocus={() => setShowDropdown(true)}
-                        onBlur={() =>
-                          setTimeout(() => setShowDropdown(false), 400)
-                        }
-                        className={`block w-full p-2 border rounded ${
-                          inputError.batch
-                            ? "border-red-500"
-                            : "border-gray-300"
-                        }`}
-                        placeholder="Type to search batch"
-                      />
-                      {inputError.batch && (
-                        <span className="text-red-500 text-xs">Required</span>
-                      )}
-                      {showDropdown && filteredBatches.length > 0 && (
-                        <div className="absolute left-0 right-0 bg-white border border-gray-300 mt-1 rounded max-h-40 overflow-y-auto shadow-lg">
-                          {filteredBatches.map((batch) => (
-                            <div
-                              key={batch.id}
-                              className="p-2 hover:bg-gray-200 cursor-pointer"
-                              onClick={() => handleBatchSelect(batch)}
-                            >
-                              {batch.batch_number} -{" "}
-                              {batch.product_alias?.product_alias}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="mt-4">
-                      <label className="block mb-2 text-sm font-medium text-gray-700">
-                        Number of QR Codes
-                      </label>
-                      <input
-                        type="number"
-                        value={numEntries}
-                        onChange={(e) => setNumEntries(e.target.value)}
-                        className={`block w-full p-2 border rounded ${
-                          inputError.num ? "border-red-500" : "border-gray-300"
-                        }`}
-                        max={9999}
-                      />
-                      {inputError.num && (
-                        <span className="text-red-500 text-xs">
-                          {numEntries && Number(numEntries) > (inputError.maxEntries || 9999)
-                            ? `Cannot be greater than ${inputError.maxEntries || 9999}`
-                            : "Required"}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Radio buttons for QR type */}
-                    <div className="mt-4">
-                      <label className="block mb-2 text-sm font-medium text-gray-700">
-                        QR Type
-                      </label>
-                      <div className="flex items-center mb-2">
-                        <input
-                          type="radio"
-                          id="primaryQR"
-                          name="qrType"
-                          value="primary"
-                          checked={qrType === "primary"}
-                          onChange={() => setQrType("primary")}
-                          className="mr-2"
-                        />
-                        <label
-                          htmlFor="primaryQR"
-                          className="text-sm text-gray-700"
-                        >
-                          Primary QR
-                        </label>
-                      </div>
-                      <div className="flex items-center">
-                        <input
-                          type="radio"
-                          id="boxQR"
-                          name="qrType"
-                          value="box"
-                          checked={qrType === "box"}
-                          onChange={() => setQrType("box")}
-                          className="mr-2"
-                        />
-                        <label
-                          htmlFor="boxQR"
-                          className="text-sm text-gray-700"
-                        >
-                          Box QR
-                        </label>
-                      </div>
-                    </div>
-
-                    <div className="mt-6">
-                      <button
-                        onClick={handleGenerateQr}
-                        className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 w-full disabled:opacity-60"
-                        disabled={generateLoading}
+        <div className="no-print p-6">
+          <h1>Generate QR</h1>
+  
+          <div className="flex justify-center bg-gray-100">
+            <div className="w-full max-w-xs bg-white p-6 shadow-md rounded-lg">
+              
+              {/* Batch selector */}
+              <label className="block mb-2 text-sm font-medium text-gray-700">
+                Select Batch
+              </label>
+  
+              <div className="relative w-full">
+                <input
+                  type="text"
+                  value={batchDisplay}
+                  onChange={handleBatchSearch}
+                  onFocus={() => setShowDropdown(true)}
+                  onBlur={() => setTimeout(() => setShowDropdown(false), 400)}
+                  className={`block w-full p-2 border rounded ${
+                    inputError.batch ? "border-red-500" : "border-gray-300"
+                  }`}
+                  placeholder="Type to search batch"
+                />
+  
+                {inputError.batch && (
+                  <span className="text-red-500 text-xs">Required</span>
+                )}
+  
+                {showDropdown && filteredBatches.length > 0 && (
+                  <div className="absolute left-0 right-0 bg-white border border-gray-300 mt-1 rounded max-h-40 overflow-y-auto shadow-lg">
+                    {filteredBatches.map((batch) => (
+                      <div
+                        key={batch.id}
+                        className="p-2 hover:bg-gray-200 cursor-pointer"
+                        onClick={() => handleBatchSelect(batch)}
                       >
-                        {generateLoading
-                          ? "Please wait..."
-                          : "Generate and Download QR"}
-                      </button>
-                    </div>
-                    {/* Print QR button hidden as requested */}
-                    <div className="mt-6">
-                      <button
-                        onClick={handlePrintPdf}
-                        className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 w-full disabled:opacity-60"
-                        disabled={printPdfLoading}
-                      >
-                        {printPdfLoading ? "Please wait..." : "Print PDF"}
-                      </button>
-                    </div>
+                        {batch.batch_number} - {batch.product_alias?.product_alias}
+                      </div>
+                    ))}
                   </div>
-                </div>
+                )}
               </div>
-            </div>
-          </div>
-
-          {/* Dialog Box for "QR already generated" */}
-          {showDialog && (
-            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex justify-center items-center">
-              <div className="bg-white p-6 rounded shadow-lg max-w-sm w-full text-center">
-                <p className="text-lg mb-4">
-                  QR already generated for given Batch Number
-                </p>
-                <div className="flex flex-wrap justify-center gap-4 mt-4 w-full">
-                  <button
-                    onClick={handleRegenerateQr}
-                    className="bg-blue-600 text-white px-4 py-2 rounded disabled:opacity-60"
-                    disabled={regenLoading}
-                  >
-                    {regenLoading ? "Please wait..." : "Regenerate QR"}
-                  </button>
-                  
-                  <button
-                    onClick={handleReprintPdf}
-                    className="bg-purple-600 text-white px-4 py-2 rounded disabled:opacity-60"
-                    disabled={reprintPdfLoading}
-                  >
-                    {reprintPdfLoading ? "Please wait..." : "Reprint PDF"}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setCancelLoading(true);
-                      setShowDialog(false);
-                      setTimeout(() => setCancelLoading(false), 500);
-                    }}
-                    className="bg-gray-600 text-white px-4 py-2 rounded disabled:opacity-60"
-                    disabled={cancelLoading}
-                  >
-                    {cancelLoading ? "Please wait..." : "Cancel"}
-                  </button>
-                </div>
+  
+              {/* Number of QR */}
+              <div className="mt-4">
+                <label className="block mb-2 text-sm font-medium text-gray-700">
+                  Number of QR Codes
+                </label>
+  
+                <input
+                  type="number"
+                  value={numEntries}
+                  onChange={(e) => setNumEntries(e.target.value)}
+                  className={`block w-full p-2 border rounded ${
+                    inputError.num ? "border-red-500" : "border-gray-300"
+                  }`}
+                  max={9999}
+                />
+  
+                {inputError.num && (
+                  <span className="text-red-500 text-xs">
+                    {numEntries &&
+                    Number(numEntries) > (inputError.maxEntries || 9999)
+                      ? `Cannot be greater than ${inputError.maxEntries || 9999}`
+                      : "Required"}
+                  </span>
+                )}
               </div>
-            </div>
-          )}
-
-          {/* PrintQr component */}
-          <div className="print-only">
-            <PrintQr qrList={qrList} sendDataToParent={handleValueFromChild} />
-          </div>
-
-          {/* Dimensions Modal */}
-          {showDimensionsModal && (
-            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex justify-center items-center">
-              <div className="bg-white p-6 rounded shadow-lg max-w-sm w-full text-center">
-                <h2 className="text-lg font-bold mb-4">Enter Label Dimensions</h2>
-                <div className="mb-2">
-                  <div className="flex justify-center gap-4 mb-2">
-                    <button
-                      onClick={() => setActiveInput("height")}
-                      className={`px-4 py-2 rounded text-white ${
-                        activeInput === "height"
-                          ? "bg-teal-600"
-                          : "bg-gray-400"
-                      }`}
-                    >
-                      Enter Height
-                    </button>
-                    <button
-                      onClick={() => setActiveInput("width")}
-                      className={`px-4 py-2 rounded text-white ${
-                        activeInput === "width"
-                          ? "bg-teal-600"
-                          : "bg-gray-400"
-                      }`}
-                    >
-                      Enter Width
-                    </button>
-                  </div>
-                  <p className="text-xs text-gray-500 mb-4">
-                    Width and height maintain a ratio of 1:1.3 (width = height × 1.3)
-                  </p>
-                </div>
-
-                <div className="flex items-center justify-center mb-4">
+  
+              {/* QR Type */}
+              <div className="mt-4">
+                <label className="block mb-2 text-sm font-medium text-gray-700">
+                  QR Type
+                </label>
+  
+                <div className="flex items-center mb-2">
                   <input
-                    id="datesIncluded"
-                    type="checkbox"
-                    checked={datesIncluded}
-                    onChange={() => setDatesIncluded(prev => !prev)}
+                    type="radio"
+                    id="primaryQR"
+                    name="qrType"
+                    checked={qrType === "primary"}
+                    onChange={() => setQrType("primary")}
                     className="mr-2"
                   />
-                  <label htmlFor="datesIncluded" className="text-sm text-gray-700">
-                    Include Mfg and Exp Dates
+                  <label htmlFor="primaryQR" className="text-sm text-gray-700">
+                    Primary QR
                   </label>
                 </div>
-
-                {/* Optional inner boxes field for Box QR */}
-                {qrType === 'box' && (
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Number of Inner Boxes (optional)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={noOfInnerBoxes}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        // allow empty or integer >= 0
-                        if (v === "") {
-                          setNoOfInnerBoxes("");
-                        } else {
-                          const parsed = parseInt(v, 10);
-                          if (!isNaN(parsed) && parsed >= 0) setNoOfInnerBoxes(String(parsed));
-                        }
-                      }}
-                      className={`w-full p-2 border rounded border-gray-300`}
-                      placeholder="Leave empty to skip"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">Provide a non-zero integer to include this value in the request. Zero or empty will be ignored.</p>
-                  </div>
-                )}
-
-                {activeInput === "width" ? (
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Label Width (mm)
-                    </label>
-                    <input
-                      type="number"
-                      value={labelWidth}
-                      onChange={(e) => {
-                        // Store raw input value
-                        const inputValue = e.target.value;
-                        
-                        // Parse as integer or empty string if invalid
-                        const val = inputValue === "" ? "" : parseInt(inputValue, 10);
-                        
-                        // Update width
-                        setLabelWidth(val);
-                        
-                        // Calculate and update height based on width/1.3 ratio
-                        if (val && !isNaN(val) && val > 0) {
-                          const calculatedHeight = Math.round(val / 1.3);
-                          setLabelHeight(calculatedHeight);
-                          
-                          // Update error states for both
-                          setInputError(prev => ({
-                            ...prev,
-                            width: false,
-                            height: false
-                          }));
-                        } else {
-                          // Update error state
-                          setInputError(prev => ({
-                            ...prev,
-                            width: true
-                          }));
-                        }
-                      }}
-                      className={`w-full p-2 border rounded ${
-                        inputError.width ? "border-red-500" : "border-gray-300"
-                      }`}
-                      min="1"
-                    />
-                    {inputError.width && (
-                      <span className="text-red-500 text-xs">Width must be a positive integer</span>
-                    )}
-                    <div className="mt-2 text-sm text-gray-600">
-                      Height: {labelHeight} mm (calculated)
-                    </div>
-                  </div>
-                ) : (
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Label Height (mm)
-                    </label>
-                    <input
-                      type="number"
-                      value={labelHeight}
-                      onChange={(e) => {
-                        // Store raw input value
-                        const inputValue = e.target.value;
-                        
-                        // Parse as integer or empty string if invalid
-                        const val = inputValue === "" ? "" : parseInt(inputValue, 10);
-                        
-                        // Update height
-                        setLabelHeight(val);
-                        
-                        // Calculate and update width based on height*1.3 ratio
-                        if (val && !isNaN(val) && val > 0) {
-                          const calculatedWidth = Math.round(val * 1.3);
-                          setLabelWidth(calculatedWidth);
-                          
-                          // Update error states for both
-                          setInputError(prev => ({
-                            ...prev,
-                            width: false,
-                            height: false
-                          }));
-                        } else {
-                          // Update error state
-                          setInputError(prev => ({
-                            ...prev,
-                            height: true
-                          }));
-                        }
-                      }}
-                      className={`w-full p-2 border rounded ${
-                        inputError.height ? "border-red-500" : "border-gray-300"
-                      }`}
-                      min="1"
-                    />
-                    {inputError.height && (
-                      <span className="text-red-500 text-xs">Height must be a positive integer</span>
-                    )}
-                    <div className="mt-2 text-sm text-gray-600">
-                      Width: {labelWidth} mm (calculated)
-                    </div>
-                  </div>
-                )}
-                <div className="flex justify-center gap-4 mt-6">
-                  <button
-                    onClick={() => {
-                      if (dimensionAction === "print") {
-                        executePrintPdf();
-                      } else {
-                        executeReprintPdf();
-                      }
-                    }}
-                    className={`px-4 py-2 rounded text-white ${
-                      dimensionAction === "print"
-                        ? "bg-purple-600 hover:bg-purple-700"
-                        : "bg-blue-600 hover:bg-blue-700"
-                    }`}
-                    disabled={inputError.width || inputError.height || !labelWidth || !labelHeight}
-                  >
-                    {dimensionAction === "print" ? "Print PDF" : "Reprint PDF"}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowDimensionsModal(false);
-                      // Reset any error states
-                      setInputError(prev => ({
-                        ...prev,
-                        width: false,
-                        height: false
-                      }));
-                    }}
-                    className="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded"
-                  >
-                    Cancel
-                  </button>
+  
+                <div className="flex items-center">
+                  <input
+                    type="radio"
+                    id="boxQR"
+                    name="qrType"
+                    checked={qrType === "box"}
+                    onChange={() => setQrType("box")}
+                    className="mr-2"
+                  />
+                  <label htmlFor="boxQR" className="text-sm text-gray-700">
+                    Box QR
+                  </label>
                 </div>
               </div>
+  
+              {/* Generate */}
+              <div className="mt-6">
+                <button
+                  onClick={handleGenerateQr}
+                  disabled={generateLoading}
+                  className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 w-full disabled:opacity-60"
+                >
+                  {generateLoading ? "Please wait..." : "Generate and Download QR"}
+                </button>
+              </div>
+  
+              {/* Print PDF */}
+              <div className="mt-6">
+                <button
+                  onClick={handlePrintPdf}
+                  disabled={printPdfLoading}
+                  className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 w-full disabled:opacity-60"
+                >
+                  {printPdfLoading ? "Please wait..." : "Print PDF"}
+                </button>
+              </div>
             </div>
-          )}
-        </>
+          </div>
+        </div>
       )}
-    </div>
+  
+      {/* Dialog */}
+      {showDialog && (
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex justify-center items-center">
+          <div className="bg-white p-6 rounded shadow-lg max-w-sm w-full text-center">
+            <p className="text-lg mb-4">
+              QR already generated for given Batch Number
+            </p>
+  
+            <div className="flex flex-wrap justify-center gap-4">
+              <button
+                onClick={handleRegenerateQr}
+                disabled={regenLoading}
+                className="bg-blue-600 text-white px-4 py-2 rounded"
+              >
+                {regenLoading ? "Please wait..." : "Regenerate QR"}
+              </button>
+  
+              <button
+                onClick={handleReprintPdf}
+                className="bg-purple-600 text-white px-4 py-2 rounded"
+              >
+                Reprint PDF
+              </button>
+  
+              <button
+                onClick={() => setShowDialog(false)}
+                className="bg-gray-600 text-white px-4 py-2 rounded"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dimensions Modal */}
+      {showDimensionsModal && (
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex justify-center items-center z-50">
+          <div className="bg-white p-6 rounded shadow-lg max-w-md w-full">
+            <h2 className="text-xl font-bold mb-4">Set Label Dimensions</h2>
+            
+            <div className="mb-4">
+              <label className="block mb-2 text-sm font-medium text-gray-700">
+                Height (mm)
+              </label>
+              <input
+                type="number"
+                value={labelHeight}
+                onChange={(e) => {
+                  const h = parseInt(e.target.value, 10) || 0;
+                  setLabelHeight(h);
+                  if (activeInput === "height") {
+                    setLabelWidth(Math.round(h * 1.3));
+                  }
+                }}
+                onFocus={() => setActiveInput("height")}
+                className={`block w-full p-2 border rounded ${
+                  inputError.height ? "border-red-500" : "border-gray-300"
+                }`}
+                min="1"
+              />
+              {inputError.height && (
+                <span className="text-red-500 text-xs">Height must be greater than 0</span>
+              )}
+            </div>
+
+            <div className="mb-4">
+              <label className="block mb-2 text-sm font-medium text-gray-700">
+                Width (mm)
+              </label>
+              <input
+                type="number"
+                value={labelWidth}
+                onChange={(e) => {
+                  const w = parseInt(e.target.value, 10) || 0;
+                  setLabelWidth(w);
+                  if (activeInput === "width") {
+                    setLabelHeight(Math.round(w / 1.3));
+                  }
+                }}
+                onFocus={() => setActiveInput("width")}
+                className={`block w-full p-2 border rounded ${
+                  inputError.width ? "border-red-500" : "border-gray-300"
+                }`}
+                min="1"
+              />
+              {inputError.width && (
+                <span className="text-red-500 text-xs">Width must be greater than 0</span>
+              )}
+            </div>
+
+            {qrType === "box" && (
+              <div className="mb-4">
+                <label className="block mb-2 text-sm font-medium text-gray-700">
+                  Number of Inner Boxes (optional)
+                </label>
+                <input
+                  type="number"
+                  value={noOfInnerBoxes}
+                  onChange={(e) => setNoOfInnerBoxes(e.target.value)}
+                  className="block w-full p-2 border rounded border-gray-300"
+                  min="0"
+                  placeholder="Leave empty if not applicable"
+                />
+              </div>
+            )}
+
+            <div className="mb-4">
+              <label className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={datesIncluded}
+                  onChange={(e) => setDatesIncluded(e.target.checked)}
+                  className="mr-2"
+                />
+                <span className="text-sm text-gray-700">Include Dates</span>
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowDimensionsModal(false)}
+                className="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (labelHeight <= 0 || labelWidth <= 0) {
+                    setInputError(prev => ({
+                      ...prev,
+                      height: labelHeight <= 0,
+                      width: labelWidth <= 0
+                    }));
+                    return;
+                  }
+                  
+                  if (dimensionAction === "print") {
+                    executePrintPdf();
+                  } else if (dimensionAction === "reprint") {
+                    executeReprintPdf();
+                  }
+                }}
+                disabled={printPdfLoading || reprintPdfLoading}
+                className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 disabled:opacity-60"
+              >
+                {(printPdfLoading || reprintPdfLoading) ? "Processing..." : "Continue"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+  
+      {/* Print-only */}
+      <div className="print-only">
+        <PrintQr qrList={qrList} sendDataToParent={handleValueFromChild} />
+      </div>
+  
+      {receivedValue && <PrintQr qrList={qrList} />}
+    </>
   );
-};
+};  
 
 export default GenerateQrPage;

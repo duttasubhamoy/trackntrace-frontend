@@ -1,21 +1,15 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import Sidebar from "../components/Sidebar";
-import Header from "../components/Header";
 import axios from "../utils/axiosConfig";
 import TableWithSearchAndPagination from "../components/TableWithSearchAndPagination";
 import Modal from "react-modal";
 import { CgSpinner } from "react-icons/cg";
-import { fetchCompanyCashbackStatus } from "../utils/companyUtils";
+import { FaTrash } from "react-icons/fa";
+import { useAuth } from "../context/AuthContext";
 
 const SchemePage = () => {
+  const { userData, companyCashbackEnabled } = useAuth();
   const navigate = useNavigate();
-  const [userData, setUserData] = useState({
-    name: "",
-    role: "",
-    lastLogin: "",
-    companyName: "",
-  });
   const [isLoading, setIsLoading] = useState(true);
   const [schemes, setSchemes] = useState([]);
   const [filteredSchemes, setFilteredSchemes] = useState([]);
@@ -31,58 +25,25 @@ const SchemePage = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [currentPage, setCurrentPage] = useState(0);
   const [schemesPerPage] = useState(10);
-  const [companyCashbackEnabled, setCompanyCashbackEnabled] = useState(false);
   const [inputError, setInputError] = useState({
     scheme_name: false,
     type: false,
   });
-  // Scheme Items for Add Scheme Modal
+  // Scheme Items for Add Scheme Modal (at least one is mandatory)
   const [schemeItems, setSchemeItems] = useState([{ item_name: "", percentage: "", description: "" }]);
   const [itemInputError, setItemInputError] = useState([
-    { item_name: false, percentage: false }, // Changed from true to false
+    { item_name: false, percentage: false },
   ]);
 
   useEffect(() => {
-    const fetchUserData = async () => {
-      try {
-        const response = await axios.get("/protected");
-        const { name, role, last_login, company_name, company_id } =
-          response.data;
-        setUserData({
-          name,
-          role,
-          lastLogin: last_login,
-          companyName: company_name,
-        });
-
-        // For admin users, company_id might be null - handle this case
-        if (company_id) {
-          // Only fetch company details if company_id exists
-          try {
-            const companyRes = await axios.get(`/company/${company_id}`);
-            setCompanyCashbackEnabled(companyRes.data.cashback_enabled);
-          } catch (companyError) {
-            console.error("Error fetching company data:", companyError);
-            // Don't navigate away, just set cashback to false as default
-            setCompanyCashbackEnabled(false);
-          }
-        } else {
-          // For admin users without company_id, set cashback to false
-          // You could also set it to true if you want admin to see all features
-          setCompanyCashbackEnabled(false);
-        }
-
-        if (role !== "master") {
-          navigate("/dashboard");
-        }
-        fetchSchemes();
-      } catch (error) {
-        console.error("Error fetching user data:", error);
-        navigate("/login");
-      }
-    };
-
     const fetchSchemes = async () => {
+      if (!userData) return;
+      
+      if (userData.role !== "master") {
+        navigate("/dashboard");
+        return;
+      }
+      
       try {
         const response = await axios.get("/view-scheme");
         setSchemes(response.data);
@@ -94,8 +55,8 @@ const SchemePage = () => {
       }
     };
 
-    fetchUserData();
-  }, [navigate]);
+    fetchSchemes();
+  }, [navigate, userData]);
 
   // Handle search functionality
   useEffect(() => {
@@ -150,12 +111,12 @@ const SchemePage = () => {
       expiry_date: "",
       is_active: true,
     });
-    setSchemeItems([]);
+    setSchemeItems([{ item_name: "", percentage: "", description: "" }]);
     setInputError({
       scheme_name: false,
       type: false,
     });
-    setItemInputError([]);
+    setItemInputError([{ item_name: false, percentage: false }]);
     setShowModal(false);
     setIsSubmitting(false);
   };
@@ -163,26 +124,31 @@ const SchemePage = () => {
   const handleAddScheme = async () => {
     if (!validateInputs()) return;
     
-    // Validate all scheme items if any exist
-    if (schemeItems.length > 0) {
-      const itemErrors = schemeItems.map((item) => ({
-        item_name: !item.item_name,
-        percentage: !item.percentage,
-      }));
+    // At least one scheme item is mandatory
+    if (schemeItems.length === 0) {
+      alert("At least one scheme item is required.");
+      return;
+    }
 
-      if (itemErrors.some((error) => error.item_name || error.percentage)) {
-        setItemInputError(itemErrors);
-        return;
-      }
-      // Check if total percentage is 100 or less
-      const totalPercentage = schemeItems.reduce(
-        (sum, item) => sum + Number(item.percentage || 0),
-        0
-      );
-      if (totalPercentage > 100) {
-        alert("Total percentage cannot exceed 100.");
-        return;
-      }
+    // Validate all scheme items
+    const itemErrors = schemeItems.map((item) => ({
+      item_name: !item.item_name,
+      percentage: !item.percentage,
+    }));
+
+    if (itemErrors.some((error) => error.item_name || error.percentage)) {
+      setItemInputError(itemErrors);
+      return;
+    }
+    
+    // Check if total percentage is 100 or less
+    const totalPercentage = schemeItems.reduce(
+      (sum, item) => sum + Number(item.percentage || 0),
+      0
+    );
+    if (totalPercentage > 100) {
+      alert("Total percentage cannot exceed 100.");
+      return;
     }
 
     setIsSubmitting(true);
@@ -256,6 +222,8 @@ const SchemePage = () => {
   const [itemsModalLoading, setItemsModalLoading] = useState(false);
   const [itemsModalError, setItemsModalError] = useState("");
   const [itemsModalData, setItemsModalData] = useState([]);
+  const [selectedSchemeIndex, setSelectedSchemeIndex] = useState(null);
+  const [isTogglingStatus, setIsTogglingStatus] = useState(false);
 
   const handleViewItems = async (schemeId) => {
     setShowItemsModal(true);
@@ -272,8 +240,36 @@ const SchemePage = () => {
     setItemsModalLoading(false);
   };
 
+  const handleToggleStatus = async () => {
+    if (selectedSchemeIndex === null) return;
+    
+    const selectedScheme = currentSchemes[selectedSchemeIndex];
+    const newStatus = !selectedScheme.is_active;
+    
+    setIsTogglingStatus(true);
+    try {
+      const response = await axios.patch(
+        `/update-scheme-status/${selectedScheme.id}`,
+        { is_active: newStatus }
+      );
+      
+      alert(response.data.msg || "Scheme status updated successfully");
+      
+      // Refresh schemes list
+      const schemesResponse = await axios.get("/view-scheme");
+      setSchemes(schemesResponse.data);
+      setFilteredSchemes(schemesResponse.data);
+      setSelectedSchemeIndex(null);
+    } catch (error) {
+      console.error("Error toggling scheme status:", error);
+      alert(error.response?.data?.msg || "Failed to update scheme status");
+    } finally {
+      setIsTogglingStatus(false);
+    }
+  };
+
   // Table Rows
-  const tableRows = currentSchemes.map((scheme) => [
+  const tableRows = currentSchemes.map((scheme, index) => [
     scheme.scheme_name,
     scheme.type,
     scheme.description || "N/A",
@@ -287,22 +283,20 @@ const SchemePage = () => {
     </button>,
   ]);
 
+  // Handle row selection from table
+  const handleRowSelection = (rowIndex) => {
+    setSelectedSchemeIndex(rowIndex);
+  };
+
   return (
-    <div className="flex bg-gray-100 min-h-screen">
-      <Sidebar
-        userData={userData}
-        companyCashbackEnabled={companyCashbackEnabled}
-      />
-      <div className="flex-1">
-        {isLoading ? (
-          <div className="flex justify-center items-center h-full">
-            <CgSpinner className="animate-spin text-4xl" />
-          </div>
-        ) : (
-          <>
-            <Header userData={userData} />
-            <div className="p-6">
-              <TableWithSearchAndPagination
+    <>
+      {isLoading ? (
+        <div className="flex justify-center items-center h-full">
+          <CgSpinner className="animate-spin text-4xl" />
+        </div>
+      ) : (
+        <div className="p-6">
+          <TableWithSearchAndPagination
                 tableHeaders={tableHeaders}
                 tableRows={tableRows}
                 searchTerm={searchTerm}
@@ -313,7 +307,32 @@ const SchemePage = () => {
                 onPageChange={handlePageClick}
                 currentPage={currentPage}
                 userRole={userData.role}
+                onRowSelect={handleRowSelection}
+                selectedRowIndex={selectedSchemeIndex}
               />
+
+              {/* Toggle Status Button */}
+              {selectedSchemeIndex !== null && (
+                <div className="flex justify-end mt-4 mb-4">
+                  <button
+                    onClick={handleToggleStatus}
+                    disabled={isTogglingStatus}
+                    className={`px-6 py-2 rounded text-white font-semibold ${
+                      isTogglingStatus
+                        ? "bg-gray-400 cursor-not-allowed"
+                        : currentSchemes[selectedSchemeIndex]?.is_active
+                        ? "bg-orange-600 hover:bg-orange-700"
+                        : "bg-green-600 hover:bg-green-700"
+                    }`}
+                  >
+                    {isTogglingStatus
+                      ? "Updating..."
+                      : currentSchemes[selectedSchemeIndex]?.is_active
+                      ? "Deactivate Scheme"
+                      : "Activate Scheme"}
+                  </button>
+                </div>
+              )}
 
               <Modal
                 isOpen={showModal}
@@ -401,22 +420,27 @@ const SchemePage = () => {
                     </div>
                     {/* Add Scheme Item Link and Inputs */}
                     <div className="col-span-2 mt-2">
-                      <button
-                        type="button"
-                        className="text-blue-600 underline text-sm mb-2"
-                        onClick={() => {
-                          setSchemeItems((items) => [
-                            ...items,
-                            { item_name: "", percentage: "", description: "" },
-                          ]);
-                          setItemInputError((errors) => [
-                            ...errors,
-                            { item_name: false, percentage: false }, // Initialize new items with no errors
-                          ]);
-                        }}
-                      >
-                        + Add Scheme Item
-                      </button>
+                      <div className="flex items-center justify-between mb-2">
+                        <button
+                          type="button"
+                          className="text-blue-600 underline text-sm"
+                          onClick={() => {
+                            setSchemeItems((items) => [
+                              ...items,
+                              { item_name: "", percentage: "", description: "" },
+                            ]);
+                            setItemInputError((errors) => [
+                              ...errors,
+                              { item_name: false, percentage: false },
+                            ]);
+                          }}
+                        >
+                          + Add Scheme Item
+                        </button>
+                        <span className="text-xs text-gray-500">
+                          (At least one item required)
+                        </span>
+                      </div>
                       {schemeItems.length > 0 && (
                         <div className="space-y-2">
                           {schemeItems.map((item, idx) => (
@@ -508,6 +532,25 @@ const SchemePage = () => {
                                 }}
                                 className="p-2 border rounded w-56"
                               />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (schemeItems.length === 1) {
+                                    alert("At least one scheme item is required.");
+                                    return;
+                                  }
+                                  setSchemeItems((items) =>
+                                    items.filter((_, i) => i !== idx)
+                                  );
+                                  setItemInputError((errors) =>
+                                    errors.filter((_, i) => i !== idx)
+                                  );
+                                }}
+                                className="text-red-600 hover:text-red-800 p-2"
+                                title="Delete this item"
+                              >
+                                <FaTrash />
+                              </button>
                             </div>
                           ))}
                         </div>
@@ -597,10 +640,9 @@ const SchemePage = () => {
 
               {/* Add Scheme Item Modal removed */}
             </div>
-          </>
-        )}
-      </div>
-    </div>
+
+          )}
+    </>
   );
 };
 

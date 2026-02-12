@@ -18,7 +18,21 @@ const TableWithSearchAndPagination = ({
   onDeleteRequest,
   onEditClick,
   productsData,
+  filters, // Optional: array of filter objects
+  onFiltersChange, // Optional: callback when filters change
+  onRowClick, // Optional: callback when a row is clicked, receives (rowIndex, cellIndex)
+  clickableColumns, // Optional: array of column indices that should be clickable (e.g., [0] for first column)
+  customActionButtons, // Optional: customize action button labels and colors { editLabel, editColor, deleteLabel, deleteColor }
+  onAssociateClick, // Optional: callback when associate button is clicked
+  showAssociateButton, // Optional: boolean to control visibility of Associate button
+  onRowSelect, // Optional: callback when a row is selected via radio button
+  selectedRowIndex, // Optional: controlled selected row index from parent (null to deselect)
 }) => {
+  // Extract custom button settings or use defaults
+  const editButtonLabel = customActionButtons?.editLabel || "Edit";
+  const deleteButtonLabel = customActionButtons?.deleteLabel || "Delete";
+  const editButtonColor = customActionButtons?.editColor || "teal"; // teal, green, blue, purple, etc.
+  const deleteButtonColor = customActionButtons?.deleteColor || "red"; // red, orange, yellow, etc.
   // State to handle selected row
   const [selectedRow, setSelectedRow] = useState(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -29,6 +43,13 @@ const TableWithSearchAndPagination = ({
   const [isVariantLoading, setIsVariantLoading] = useState(false);
   const [isDeleteLoading, setIsDeleteLoading] = useState(false);
   
+  // Sync internal state with parent's controlled selectedRowIndex
+  useEffect(() => {
+    if (selectedRowIndex !== undefined) {
+      setSelectedRow(selectedRowIndex);
+    }
+  }, [selectedRowIndex]);
+  
   // Log the user role for debugging
   console.log("TableWithSearchAndPagination received userRole:", userRole);
 
@@ -36,6 +57,10 @@ const TableWithSearchAndPagination = ({
   const handleRadioChange = (index) => {
     setSelectedRow(index);
     console.log(index);
+    // Call the parent callback if provided
+    if (onRowSelect) {
+      onRowSelect(index);
+    }
   };
 
   // Check if the user is admin, master, plant_owner, or staff
@@ -71,11 +96,12 @@ const TableWithSearchAndPagination = ({
   };
   
   // Reset button states when productsData changes (indicates a refresh/update)
+  // Also reset when tableRows change (e.g., when modal closes and data might update)
   useEffect(() => {
     setIsEditLoading(false);
     setIsVariantLoading(false);
     setIsDeleteLoading(false);
-  }, [productsData]);
+  }, [productsData, tableRows]);
 
   return (
     <>
@@ -119,6 +145,64 @@ const TableWithSearchAndPagination = ({
                 </th>
               ))}
             </tr>
+            {/* Optional Filter Row - Renders inline with columns */}
+            {filters && filters.length > 0 && (
+              <tr className="bg-teal-50">
+                {canSelectRows && (
+                  <th className="p-2 border-b border-white"></th>
+                )}
+                {tableHeaders.map((header, headerIndex) => {
+                  // Find all filters matching this column by columnIndex
+                  const columnFilters = filters.filter(
+                    f => f.columnIndex === headerIndex
+                  );
+                  
+                  return (
+                    <th key={headerIndex} className="p-2 border-b border-white">
+                      {columnFilters.length > 0 ? (
+                        <div className="w-full space-y-1">
+                          {columnFilters.map((filter, filterIdx) => (
+                            <div key={filterIdx}>
+                              {filter.type === "select" ? (
+                                <select
+                                  value={filter.value}
+                                  onChange={(e) => onFiltersChange && onFiltersChange(filter.name, e.target.value)}
+                                  className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-teal-500 bg-white text-gray-700"
+                                >
+                                  <option value="">{filter.placeholder || "All"}</option>
+                                  {filter.options?.map((option, optIndex) => (
+                                    <option key={optIndex} value={option.value}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : filter.type === "date" ? (
+                                <input
+                                  type="date"
+                                  value={filter.value}
+                                  onChange={(e) => onFiltersChange && onFiltersChange(filter.name, e.target.value)}
+                                  placeholder={filter.placeholder}
+                                  className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-teal-500 bg-white text-gray-700"
+                                  title={filter.placeholder} // Show placeholder as tooltip
+                                />
+                              ) : (
+                                <input
+                                  type="text"
+                                  value={filter.value}
+                                  onChange={(e) => onFiltersChange && onFiltersChange(filter.name, e.target.value)}
+                                  placeholder={filter.placeholder}
+                                  className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-teal-500 bg-white text-gray-700"
+                                />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </th>
+                  );
+                })}
+              </tr>
+            )}
           </thead>
           <tbody>
             {tableRows.length > 0 ? (
@@ -149,6 +233,13 @@ const TableWithSearchAndPagination = ({
                         >
                           {cell}
                         </span>
+                      ) : clickableColumns && clickableColumns.includes(cellIndex) ? (
+                        <span 
+                          className="cursor-pointer text-blue-600 hover:underline"
+                          onClick={() => onRowClick && onRowClick(rowIndex, cellIndex)}
+                        >
+                          {cell}
+                        </span>
                       ) : (
                         cell
                       )}
@@ -171,12 +262,41 @@ const TableWithSearchAndPagination = ({
       </div>
 
       {/* Action Buttons */}
-      {canSelectRows && selectedRow !== null && (
+      {canSelectRows && selectedRow !== null && (onEditClick || onDeleteRequest || onAssociateClick) && (
         <div className="flex justify-end mt-4">
-          <button
-            className={`bg-teal-600 text-white px-4 py-2 rounded mr-2 ${
-              isEditLoading ? "opacity-50 cursor-not-allowed" : "hover:bg-teal-700"
+          {onEditClick && (
+            <button
+            className={`bg-${editButtonColor}-600 text-white px-4 py-2 rounded mr-2 ${
+              isEditLoading ? "opacity-50 cursor-not-allowed" : `hover:bg-${editButtonColor}-700`
             }`}
+            style={{
+              backgroundColor: isEditLoading ? undefined : 
+                editButtonColor === 'green' ? '#16a34a' :
+                editButtonColor === 'orange' ? '#ea580c' :
+                editButtonColor === 'blue' ? '#2563eb' :
+                editButtonColor === 'purple' ? '#9333ea' :
+                '#0d9488', // teal default
+            }}
+            onMouseEnter={(e) => {
+              if (!isEditLoading) {
+                e.currentTarget.style.backgroundColor = 
+                  editButtonColor === 'green' ? '#15803d' :
+                  editButtonColor === 'orange' ? '#c2410c' :
+                  editButtonColor === 'blue' ? '#1d4ed8' :
+                  editButtonColor === 'purple' ? '#7e22ce' :
+                  '#0f766e'; // teal-700
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isEditLoading) {
+                e.currentTarget.style.backgroundColor = 
+                  editButtonColor === 'green' ? '#16a34a' :
+                  editButtonColor === 'orange' ? '#ea580c' :
+                  editButtonColor === 'blue' ? '#2563eb' :
+                  editButtonColor === 'purple' ? '#9333ea' :
+                  '#0d9488';
+              }
+            }}
             onClick={() => {
               if (!isEditLoading) {
                 setIsEditLoading(true);
@@ -185,10 +305,11 @@ const TableWithSearchAndPagination = ({
             }}
             disabled={isEditLoading}
           >
-            {isEditLoading ? "Processing..." : "Edit"}
+            {isEditLoading ? "Processing..." : editButtonLabel}
           </button>
+          )}
           {/* Add Variant button - only shown for products (when productsData exists) */}
-          {productsData && (
+          {productsData && onEditClick && (
             <button
               className={`bg-purple-600 text-white px-4 py-2 rounded mr-2 ${
                 isVariantLoading ? "opacity-50 cursor-not-allowed" : "hover:bg-purple-700"
@@ -204,10 +325,44 @@ const TableWithSearchAndPagination = ({
               {isVariantLoading ? "Processing..." : "Add Variant"}
             </button>
           )}
-          <button
-            className={`bg-red-600 text-white px-4 py-2 rounded ${
-              isDeleteLoading ? "opacity-50 cursor-not-allowed" : "hover:bg-red-700"
+          {onAssociateClick && showAssociateButton && (
+            <button
+              className="bg-blue-600 text-white px-4 py-2 rounded mr-2 hover:bg-blue-700"
+              onClick={() => onAssociateClick(selectedRow)}
+            >
+              Associate Seller
+            </button>
+          )}
+          {onDeleteRequest && (
+            <button
+            className={`text-white px-4 py-2 rounded ${
+              isDeleteLoading ? "opacity-50 cursor-not-allowed" : ""
             }`}
+            style={{
+              backgroundColor: isDeleteLoading ? undefined :
+                deleteButtonColor === 'orange' ? '#ea580c' :
+                deleteButtonColor === 'yellow' ? '#ca8a04' :
+                deleteButtonColor === 'red' ? '#dc2626' :
+                '#dc2626', // red default
+            }}
+            onMouseEnter={(e) => {
+              if (!isDeleteLoading) {
+                e.currentTarget.style.backgroundColor = 
+                  deleteButtonColor === 'orange' ? '#c2410c' :
+                  deleteButtonColor === 'yellow' ? '#a16207' :
+                  deleteButtonColor === 'red' ? '#b91c1c' :
+                  '#b91c1c';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isDeleteLoading) {
+                e.currentTarget.style.backgroundColor = 
+                  deleteButtonColor === 'orange' ? '#ea580c' :
+                  deleteButtonColor === 'yellow' ? '#ca8a04' :
+                  deleteButtonColor === 'red' ? '#dc2626' :
+                  '#dc2626';
+              }
+            }}
             onClick={() => {
               if (!isDeleteLoading) {
                 setShowDeleteModal(true);
@@ -215,27 +370,55 @@ const TableWithSearchAndPagination = ({
             }}
             disabled={isDeleteLoading}
           >
-            {isDeleteLoading ? "Processing..." : "Delete"}
+            {isDeleteLoading ? "Processing..." : deleteButtonLabel}
           </button>
+          )}
         </div>
       )}
 
-      {/* DELETE CONFIRMATION MODAL */}
+      {/* DELETE/REJECT CONFIRMATION MODAL */}
       <Modal
         isOpen={showDeleteModal}
         onRequestClose={() => setShowDeleteModal(false)}
-        contentLabel="Delete Confirmation"
+        contentLabel={`${deleteButtonLabel} Confirmation`}
         className="bg-white p-6 rounded-lg shadow-lg w-1/3 mx-auto mt-40"
         overlayClassName="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center"
       >
         <h2 className="text-xl font-bold mb-4 text-center">
-          Items will be deleted permanently, do you wish to continue?
+          {deleteButtonLabel === "Reject" 
+            ? "Are you sure you want to reject this indent?" 
+            : "Items will be deleted permanently, do you wish to continue?"}
         </h2>
         <div className="flex justify-center space-x-4">
           <button
-            className={`bg-red-600 text-white px-6 py-2 rounded ${
-              isDeleteLoading ? "opacity-50 cursor-not-allowed" : "hover:bg-red-700"
+            className={`text-white px-6 py-2 rounded ${
+              isDeleteLoading ? "opacity-50 cursor-not-allowed" : ""
             }`}
+            style={{
+              backgroundColor: isDeleteLoading ? undefined :
+                deleteButtonColor === 'orange' ? '#ea580c' :
+                deleteButtonColor === 'yellow' ? '#ca8a04' :
+                deleteButtonColor === 'red' ? '#dc2626' :
+                '#dc2626',
+            }}
+            onMouseEnter={(e) => {
+              if (!isDeleteLoading) {
+                e.currentTarget.style.backgroundColor = 
+                  deleteButtonColor === 'orange' ? '#c2410c' :
+                  deleteButtonColor === 'yellow' ? '#a16207' :
+                  deleteButtonColor === 'red' ? '#b91c1c' :
+                  '#b91c1c';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isDeleteLoading) {
+                e.currentTarget.style.backgroundColor = 
+                  deleteButtonColor === 'orange' ? '#ea580c' :
+                  deleteButtonColor === 'yellow' ? '#ca8a04' :
+                  deleteButtonColor === 'red' ? '#dc2626' :
+                  '#dc2626';
+              }
+            }}
             onClick={handleDeleteConfirm}
             disabled={isDeleteLoading}
           >

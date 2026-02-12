@@ -1,23 +1,15 @@
 import React, { useState, useEffect } from "react";
-import Sidebar from "../components/Sidebar";
-import Header from "../components/Header";
 import { CgSpinner } from "react-icons/cg";
 import { useNavigate } from "react-router-dom";
 import axios from "../utils/axiosConfig";
 import Modal from "react-modal";
-import { fetchCompanyCashbackStatus } from "../utils/companyUtils";
-import TableWithSearchAndPagination from "../components/TableWithSearchAndPagination"; // Import the component
+import TableWithSearchAndPagination from "../components/TableWithSearchAndPagination";
+import { useAuth } from "../context/AuthContext";
 
 const ManufacturingPlantsPage = () => {
+  const { userData, companyCashbackEnabled } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
-  const [companyCashbackEnabled, setCompanyCashbackEnabled] = useState(false);
-  const [userData, setUserData] = useState({
-    name: "",
-    role: "",
-    lastLogin: "",
-    companyName: "",
-  });
   const [plants, setPlants] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [filteredPlants, setFilteredPlants] = useState([]);
@@ -34,54 +26,28 @@ const ManufacturingPlantsPage = () => {
   const [currentPage, setCurrentPage] = useState(0);
   const plantsPerPage = 10;
 
-  // Fetch user data and manufacturing plants
+  // Fetch manufacturing plants
   useEffect(() => {
-    const fetchUserData = async () => {
+    if (!userData) return;
+
+    const fetchPlants = async () => {
       try {
-        const userResponse = await axios.get("/protected");
-        const { name, role, last_login, company_name, company_id } =
-          userResponse.data;
-        setUserData({
-          name,
-          role,
-          lastLogin: last_login,
-          companyName: company_name,
-        });
-
-        // For admin users, company_id might be null - handle this case
-        if (company_id) {
-          // Only fetch company details if company_id exists
-          try {
-            const companyRes = await axios.get(`/company/${company_id}`);
-            setCompanyCashbackEnabled(companyRes.data.cashback_enabled);
-          } catch (companyError) {
-            console.error("Error fetching company data:", companyError);
-            // Don't navigate away, just set cashback to false as default
-            setCompanyCashbackEnabled(false);
-          }
-        } else {
-          // For admin users without company_id, set cashback to false
-          // You could also set it to true if you want admin to see all features
-          setCompanyCashbackEnabled(false);
-        }
-
-        if (role === "salesman") {
+        if (userData.role === "salesman") {
           navigate("/dashboard");
         } else {
-          // Fetch manufacturing plants
           const plantsResponse = await axios.get("/get-manufacturing-plants");
           setPlants(plantsResponse.data);
           setFilteredPlants(plantsResponse.data);
         }
         setIsLoading(false);
       } catch (error) {
-        console.error("Error fetching user or plants data:", error);
+        console.error("Error fetching plants data:", error);
         navigate("/login");
       }
     };
 
-    fetchUserData();
-  }, [navigate]);
+    fetchPlants();
+  }, [userData, navigate]);
 
   // Filter plants based on search term
   useEffect(() => {
@@ -200,17 +166,13 @@ const ManufacturingPlantsPage = () => {
   ]);
 
   return (
-    <div className="flex bg-gray-100 min-h-screen">
-      <Sidebar userData={userData} companyCashbackEnabled={companyCashbackEnabled} />
-      <div className="flex-1">
-        {isLoading ? (
-          <div className="flex justify-center items-center h-full">
-            <CgSpinner className="animate-spin text-4xl" />
-          </div>
-        ) : (
-          <>
-            <Header userData={userData} />
-            <div className="p-6">
+    <>
+      {isLoading ? (
+        <div className="flex justify-center items-center h-full">
+          <CgSpinner className="animate-spin text-4xl" />
+        </div>
+      ) : (
+        <div className="p-6">
               <TableWithSearchAndPagination
                 tableHeaders={tableHeaders}
                 tableRows={tableRows}
@@ -338,10 +300,8 @@ const ManufacturingPlantsPage = () => {
                 </div>
               </Modal>
             </div>
-          </>
         )}
-      </div>
-    </div>
+    </>
   );
 };
 

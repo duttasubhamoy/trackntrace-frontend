@@ -1,19 +1,19 @@
 import React, { useState, useEffect } from "react";
 import Modal from "react-modal";
-import Sidebar from "../components/Sidebar";
-import Header from "../components/Header";
 import { CgSpinner } from "react-icons/cg";
 import { useNavigate } from "react-router-dom";
 import axios from "../utils/axiosConfig";
-import { fetchCompanyCashbackStatus } from "../utils/companyUtils";
+import { useAuth } from "../context/AuthContext";
 import TableWithSearchAndPagination from "../components/TableWithSearchAndPagination";
 
-Modal.setAppElement("#root"); // For accessibility
+Modal.setAppElement("#root");
 
 const BatchesPage = () => {
+  const { userData, companyCashbackEnabled, companyPackingEnabled, companies } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [batches, setBatches] = useState([]);
   const [filteredBatches, setFilteredBatches] = useState([]);
+  const [cashbackEnabled, setCashbackEnabled] = useState(false);
   const [products, setProducts] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [newBatch, setNewBatch] = useState({
@@ -24,8 +24,9 @@ const BatchesPage = () => {
     extra_fields: {},
     scheme_id: "",
     mrp: "",
-    company_id: "", // Added for admin to select company
-    no_of_inner_box: "", // Added for packing enabled companies, will be parsed as integer when submitting
+    company_id: "",
+    no_of_inner_box: "",
+    cashback_amount: "",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [extraFields, setExtraFields] = useState([]);
@@ -33,16 +34,9 @@ const BatchesPage = () => {
   const [currentPage, setCurrentPage] = useState(0);
   const [batchesPerPage] = useState(10);
   const [duplicateBatchError, setDuplicateBatchError] = useState("");
-  const [companyCashbackEnabled, setCompanyCashbackEnabled] = useState(false);
   const [packingEnabled, setPackingEnabled] = useState(false);
   const [schemes, setSchemes] = useState([]);
   const navigate = useNavigate();
-  const [userData, setUserData] = useState({
-    name: "",
-    role: "",
-    lastLogin: "",
-    companyName: "",
-  });
   const [inputError, setInputError] = useState({
     batch_number: false,
     exp_date: false,
@@ -50,71 +44,21 @@ const BatchesPage = () => {
     product_id: false,
     mrp: false,
     company_id: false,
-    no_of_inner_box: false, // Added for packing enabled companies
+    no_of_inner_box: false,
   });
-  const [companies, setCompanies] = useState([]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const userRes = await axios.get("/protected");
-        const { name, role, last_login, company_name, company_id } =
-          userRes.data;
-        setUserData({
-          name,
-          role,
-          lastLogin: last_login,
-          companyName: company_name,
-          companyId: company_id,
-        });
-        console.log("BatchesPage - User role set to:", role); // Debug log
-        if (role === "salesman") {
+        if (userData?.role === "salesman") {
           navigate("/seller");
-        }
-
-        // For admin users, fetch all companies
-        if (role === "admin") {
-          try {
-            const companiesRes = await axios.get("/companies");
-            console.log("Companies data:", companiesRes.data);
-            setCompanies(companiesRes.data);
-            // Admin has no specific company cashback, set to false by default
-            setCompanyCashbackEnabled(false);
-          } catch (error) {
-            console.error("Error fetching companies:", error);
-          }
-        } else if (company_id) {
-          // For non-admin users, set the company_id in newBatch
-          setNewBatch(prevState => ({
-            ...prevState,
-            company_id: company_id
-          }));
-          
-          // Only fetch company details if company_id exists
-          try {
-            const companyRes = await axios.get(`/company/${company_id}`);
-            console.log(companyRes.data)
-            setCompanyCashbackEnabled(companyRes.data.cashback_enabled);
-            // Check and set packing_enabled status
-            setPackingEnabled(companyRes.data.packing_enabled === true);
-          } catch (companyError) {
-            console.error("Error fetching company data:", companyError);
-            // Don't navigate away, just set defaults
-            setCompanyCashbackEnabled(false);
-            setPackingEnabled(false);
-          }
-        } else {
-          // For users without company_id, set cashback to false
-          setCompanyCashbackEnabled(false);
+          return;
         }
 
         // Fetch products based on user role
-        if (role === "admin") {
-          // Admin without selected company will see no products initially
-          // Products will be fetched when a company is selected
+        if (userData?.role === "admin") {
           setProducts([]);
         } else {
-          // Non-admin users will see products for their company
           const productsRes = await axios.get("/products");
           setProducts(productsRes.data);
         }
@@ -124,27 +68,42 @@ const BatchesPage = () => {
         setFilteredBatches(batchesRes.data);
 
         // Skip extra fields API call if user is admin
-        if (role !== "admin") {
+        if (userData?.role !== "admin") {
           const extraFieldsRes = await axios.get("/company-extra-fields");
           setExtraFields(extraFieldsRes.data.extra_field_batch);
         }
 
-        // For admin, fetch schemes with company_id param if company selected
-        if (role === "admin" && company_id) {
-          const schemesRes = await axios.get(`/view-scheme?company_id=${company_id}`);
+        // Fetch schemes
+        if (userData?.role === "admin" && userData.companyId) {
+          const schemesRes = await axios.get(`/view-scheme?company_id=${userData.companyId}`);
           setSchemes(schemesRes.data);
         } else {
           const schemesRes = await axios.get("/view-scheme");
           setSchemes(schemesRes.data);
         }
+
+        // Set packing enabled from context
+        setPackingEnabled(companyPackingEnabled === true);
+
+        // For non-admin users, set company_id in newBatch
+        if (userData?.role !== "admin" && userData.companyId) {
+          setNewBatch(prevState => ({
+            ...prevState,
+            company_id: userData.companyId
+          }));
+        }
+
+        setIsLoading(false);
       } catch (error) {
         console.error("Error fetching data:", error);
-        navigate("/login");
+        setIsLoading(false);
       }
-      setIsLoading(false);
     };
-    fetchData();
-  }, [navigate]);
+
+    if (userData) {
+      fetchData();
+    }
+  }, [navigate, userData, companyPackingEnabled]);
 
   useEffect(() => {
     const filtered = batches.filter((batch) =>
@@ -164,7 +123,7 @@ const BatchesPage = () => {
       console.log(`Company ${companyId} packing_enabled:`, isPackingEnabled);
       
       // Also update cashback status while we're fetching company details
-      setCompanyCashbackEnabled(companyRes.data.cashback_enabled);
+      setCashbackEnabled(companyRes.data.cashback_enabled);
       
       return isPackingEnabled;
     } catch (error) {
@@ -197,8 +156,8 @@ const BatchesPage = () => {
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     
-    // Handle no_of_inner_box as an integer or empty string
-    if (name === "no_of_inner_box") {
+    // Handle no_of_inner_box and cashback_amount as integers or empty string
+    if (name === "no_of_inner_box" || name === "cashback_amount") {
       // Only set if value is a valid number or empty
       if (value === "" || !isNaN(value)) {
         setNewBatch({ ...newBatch, [name]: value });
@@ -264,7 +223,9 @@ const BatchesPage = () => {
   };
 
   const handleFormSubmit = async () => {
-    if (!validateInputs()) return;
+    if (!validateInputs()) {
+      return;
+    }
     setIsSubmitting(true);
     setDuplicateBatchError(""); 
     try {
@@ -288,6 +249,18 @@ const BatchesPage = () => {
       } else {
         // If packing not enabled, don't send this field
         delete batchData.no_of_inner_box;
+      }
+      
+      // Ensure cashback_amount is properly handled as an integer when companyCashbackEnabled
+      if (companyCashbackEnabled) {
+        if (batchData.cashback_amount === "") {
+          batchData.cashback_amount = null; // Use null for empty values
+        } else {
+          batchData.cashback_amount = parseInt(batchData.cashback_amount); // Ensure it's an integer
+        }
+      } else {
+        // If cashback not enabled, don't send this field
+        delete batchData.cashback_amount;
       }
       
       if (editMode) {
@@ -325,6 +298,7 @@ const BatchesPage = () => {
         mrp: "",
         company_id: userData.role === "admin" ? "" : userData.companyId || "",
         no_of_inner_box: "", // Reset inner box count too
+        cashback_amount: "", // Reset cashback amount too
       });
       setInputError({
         batch_number: false,
@@ -380,7 +354,6 @@ const BatchesPage = () => {
 
   const handleEditBatch = async (batchId) => {
     try {
-      setIsSubmitting(true);
       // Fetch the batch data
       const response = await axios.get(`/batch/${batchId}`);
       const batchData = response.data;
@@ -415,11 +388,9 @@ const BatchesPage = () => {
       
       // Open the modal
       setShowModal(true);
-      setIsSubmitting(false);
     } catch (error) {
       console.error("Error fetching batch for edit:", error);
       alert("Failed to load batch details.");
-      setIsSubmitting(false);
     }
   };
 
@@ -491,37 +462,31 @@ const BatchesPage = () => {
     batch.plant_name,
   ]);
   return (
-    <div className="flex bg-gray-100 min-h-screen">
-      <Sidebar
-        userData={userData}
-        companyCashbackEnabled={companyCashbackEnabled}
-      />
-      <div className="flex-1">
-        {isLoading ? (
-          <div className="flex justify-center items-center h-full">
-            <CgSpinner className="animate-spin text-4xl" />
-          </div>
-        ) : (
-          <>
-            <Header userData={userData} />
-            <div className="p-6">
-              <TableWithSearchAndPagination
-                tableHeaders={tableHeaders}
-                tableRows={tableRows}
-                searchTerm={searchTerm}
-                setSearchTerm={setSearchTerm}
-                buttonText="Add New Batch"
-                onButtonClick={() => {
-                  setNewBatch({
-                    batch_number: "",
-                    exp_date: "",
-                    mfg_date: "",
-                    product_id: "",
+    <>
+      {isLoading ? (
+        <div className="flex justify-center items-center h-full">
+          <CgSpinner className="animate-spin text-4xl" />
+        </div>
+      ) : (
+        <div className="p-6">
+          <TableWithSearchAndPagination
+            tableHeaders={tableHeaders}
+            tableRows={tableRows}
+            searchTerm={searchTerm}
+            setSearchTerm={setSearchTerm}
+            buttonText="Add New Batch"
+            onButtonClick={() => {
+              setNewBatch({
+                batch_number: "",
+                exp_date: "",
+                mfg_date: "",
+                product_id: "",
                     extra_fields: {},
                     scheme_id: "",
                     mrp: "",
                     company_id: "",
                     no_of_inner_box: "",
+                    cashback_amount: "",
                   });
                   setEditMode(false);
                   setEditBatchId(null);
@@ -552,6 +517,9 @@ const BatchesPage = () => {
                   setShowModal(false);
                   setEditMode(false);
                   setEditBatchId(null);
+                  setIsSubmitting(false);
+                  // Force a re-render by updating the filtered batches reference
+                  setFilteredBatches([...filteredBatches]);
                 }}
                 contentLabel={editMode ? "Edit Batch" : "Add New Batch"}
                 className="bg-white p-6 rounded shadow-lg w-1/2 mx-auto mt-10"
@@ -568,6 +536,9 @@ const BatchesPage = () => {
                     setShowModal(false);
                     setEditMode(false);
                     setEditBatchId(null);
+                    setIsSubmitting(false);
+                    // Force a re-render by updating the filtered batches reference
+                    setFilteredBatches([...filteredBatches]);
                   }}
                   className="absolute top-4 right-4 text-gray-500 hover:text-gray-700"
                 >
@@ -612,7 +583,7 @@ const BatchesPage = () => {
 
                     <div>
                       <label className="block text-sm font-medium mb-1">
-                        Max Retail Price
+                        Max Retail Price<span className="text-red-500">*</span>
                       </label>
                       <input
                         type="number"
@@ -630,7 +601,7 @@ const BatchesPage = () => {
 
                     <div>
                       <label className="block text-sm font-medium mb-1">
-                        Expiration Date
+                        Expiration Date<span className="text-red-500">*</span>
                       </label>
                       <input
                         type="date"
@@ -650,7 +621,7 @@ const BatchesPage = () => {
 
                     <div>
                       <label className="block text-sm font-medium mb-1">
-                        Manufacturing Date
+                        Manufacturing Date<span className="text-red-500">*</span>
                       </label>
                       <input
                         type="date"
@@ -672,7 +643,7 @@ const BatchesPage = () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium mb-1">
-                        Batch Number
+                        Batch Number <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="text"
@@ -701,7 +672,7 @@ const BatchesPage = () => {
                     </div>
                     <div>
                       <label className="block text-sm font-medium mb-1">
-                        Max Retail Price
+                        Max Retail Price<span className="text-red-500">*</span>
                       </label>
                       <input
                         type="number"
@@ -718,7 +689,7 @@ const BatchesPage = () => {
                     </div>
                     <div>
                       <label className="block text-sm font-medium mb-1">
-                        Expiration Date
+                        Expiration Date<span className="text-red-500">*</span>
                       </label>
                       <input
                         type="date"
@@ -737,7 +708,7 @@ const BatchesPage = () => {
                     </div>
                     <div>
                       <label className="block text-sm font-medium mb-1">
-                        Manufacturing Date
+                        Manufacturing Date<span className="text-red-500">*</span>
                       </label>
                       <input
                         type="date"
@@ -771,7 +742,7 @@ const BatchesPage = () => {
                               : "border-gray-300"
                           }`}
                         >
-                          <option value="">Select Company</option>
+                          <option value="">Select Company<span className="text-red-500">*</span></option>
                           {console.log("Companies in dropdown render:", companies)}
                             {companies && companies.map((company) => {
                               console.log("Company item:", company);
@@ -793,7 +764,7 @@ const BatchesPage = () => {
                     {/* Product & Cashback Fields in One Row */}
                     <div>
                       <label className="block text-sm font-medium mb-1">
-                        Product
+                        Product <span className="text-red-500">*</span>
                       </label>
                       <select
                         name="product_id"
@@ -824,31 +795,55 @@ const BatchesPage = () => {
                       )}
                     </div>
                     {companyCashbackEnabled && (
-                      <div>
-                        <label className="block text-sm font-medium mb-1">
-                          Scheme
-                        </label>
-                        <select
-                          name="scheme_id"
-                          value={newBatch.scheme_id}
-                          onChange={handleInputChange}
-                          className="w-full p-2 border rounded border-gray-300"
-                        >
-                          <option value="">
-                            {userData.role === "admin" && !newBatch.company_id 
-                              ? "Select a company first" 
-                              : "Select Scheme"}
-                          </option>
-                          {schemes.map((scheme) => {
-                            const schemeId = scheme.id || scheme._id;
-                            return (
-                              <option key={schemeId} value={schemeId}>
-                                {scheme.scheme_name}
-                              </option>
-                            );
-                          })}
-                        </select>
-                      </div>
+                      <>
+                        <div>
+                          <label className="block text-sm font-medium mb-1">
+                            Scheme
+                          </label>
+                          <select
+                            name="scheme_id"
+                            value={newBatch.scheme_id}
+                            onChange={handleInputChange}
+                            className="w-full p-2 border rounded border-gray-300"
+                          >
+                            <option value="">
+                              {userData.role === "admin" && !newBatch.company_id 
+                                ? "Select a company first" 
+                                : "Select Scheme"}
+                            </option>
+                            {schemes.map((scheme) => {
+                              const schemeId = scheme.id || scheme._id;
+                              return (
+                                <option key={schemeId} value={schemeId}>
+                                  {scheme.scheme_name}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium mb-1">
+                            Cashback Amount
+                          </label>
+                          <input
+                            type="number"
+                            name="cashback_amount"
+                            value={newBatch.cashback_amount}
+                            onChange={handleInputChange}
+                            min="0"
+                            step="1"
+                            onKeyPress={(e) => {
+                              // Allow only digits and navigation keys
+                              if (!/[0-9]/.test(e.key) && e.key !== 'Backspace' && e.key !== 'Delete' && 
+                                  e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'Tab') {
+                                e.preventDefault();
+                              }
+                            }}
+                            className="w-full p-2 border rounded border-gray-300"
+                            placeholder="Enter cashback amount"
+                          />
+                        </div>
+                      </>
                     )}
                   </div>
                 )}
@@ -898,7 +893,7 @@ const BatchesPage = () => {
                       }`}
                     />
                     {inputError.no_of_inner_box && (
-                      <span className="text-red-500 text-xs">Required for this company</span>
+                      <span className="text-red-500 text-xs">Required</span>
                     )}
                   </div>
                 )}
@@ -924,11 +919,9 @@ const BatchesPage = () => {
                   </button>
                 </div>
               </Modal>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+        </div>
+      )}
+    </>
   );
 };
 
