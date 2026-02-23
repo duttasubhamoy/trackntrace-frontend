@@ -9,7 +9,8 @@ const PackPage = () => {
   const { userData, companyPackingEnabled } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
-  
+  const URL_PREFIX = process.env.REACT_APP_QR_PREFIX || "";
+
   // Outer QR input and packing info
   const [outerQrInput, setOuterQrInput] = useState("");
   const [isFetchingPackInfo, setIsFetchingPackInfo] = useState(false);
@@ -96,7 +97,34 @@ const PackPage = () => {
       }, 100);
     } catch (error) {
       console.error("Error fetching packing info:", error);
-      const errorMsg = error.response?.data?.description || error.response?.data?.message || "Failed to fetch packing information";
+
+      let errorMsg = "Failed to fetch packing information";
+
+      if (error.response) {
+        const status = error.response.status;
+        const data = error.response.data;
+
+        if (data) {
+          if (typeof data === "string") {
+            // Some backends return a plain string description
+            errorMsg = data;
+          } else if (typeof data === "object") {
+            // Prefer detailed backend description, then message
+            // Flask's abort() sends description in the 'description' field
+            errorMsg = data.description || data.message || data.error || errorMsg;
+          }
+        }
+
+        // Add status-specific context if no specific message was found
+        if (errorMsg === "Failed to fetch packing information") {
+          if (status === 404) {
+            errorMsg = "QR code not found or invalid";
+          } else if (status === 409) {
+            errorMsg = "Unit is not eligible for packing";
+          }
+        }
+      }
+
       setPackingError(errorMsg);
       setPackingInfo(null);
     } finally {
@@ -104,35 +132,42 @@ const PackPage = () => {
     }
   };
 
+
   const handleInnerQrSubmit = (e) => {
     e.preventDefault();
     
     if (!innerQrInput.trim()) {
       return;
     }
-
-    const trimmedQr = innerQrInput.trim();
-
-    // Check if already scanned
-    if (scannedInnerQrs.includes(trimmedQr)) {
+  
+    const rawQr = innerQrInput.trim();
+    let normalizedQr = rawQr;
+  
+    // Remove backend URL prefix if present
+    if (URL_PREFIX && normalizedQr.startsWith(URL_PREFIX)) {
+      normalizedQr = normalizedQr.slice(URL_PREFIX.length);
+      if (normalizedQr.startsWith("/")) {
+        normalizedQr = normalizedQr.slice(1);
+      }
+    }
+  
+    // Use normalizedQr instead of innerQrInput.trim()
+    if (scannedInnerQrs.includes(normalizedQr)) {
       setInnerQrError("This QR code has already been scanned");
       setInnerQrInput("");
       return;
     }
-
-    // Check if we've reached the limit
+  
     if (scannedInnerQrs.length >= packingInfo.no_of_inner_box) {
       setInnerQrError("All inner boxes have been scanned");
       setInnerQrInput("");
       return;
     }
-
-    // Add to scanned list
-    setScannedInnerQrs([...scannedInnerQrs, trimmedQr]);
+  
+    setScannedInnerQrs([...scannedInnerQrs, normalizedQr]);
     setInnerQrInput("");
     setInnerQrError("");
-    
-    // Keep focus on input
+  
     if (innerQrRef.current) {
       innerQrRef.current.focus();
     }
@@ -144,6 +179,7 @@ const PackPage = () => {
     }
 
     setIsCompletingPacking(true);
+    console.log("Completing packing with inner QR codes:", scannedInnerQrs);
 
     try {
       const response = await axios.post(`/${packingInfo.encrypted_unit_id}/populate-primary-qrs`, {

@@ -134,10 +134,20 @@ axiosInstance.interceptors.response.use(
         console.log("Forbidden access:", parsedData.message || error.message);
         alert("You do not have permission to access this resource.");
       }
-      // Handle not found errors (e.g., show alert)
+      // Handle 404 errors - let component handle packing-related 404s
       else if (status === 404) {
+        // Check if this is a packing-related request
+        if (originalRequest.url && originalRequest.url.includes("start-packing")) {
+          // Let the component handle this error
+          return Promise.reject(error);
+        }
         console.log("Resource not found:", parsedData.message || error.message);
         alert("The requested resource was not found.");
+      }
+      // Handle 409 Conflict errors - let component handle them (packing status errors)
+      else if (status === 409) {
+        // Don't show global alert, let component handle the specific error message
+        return Promise.reject(error);
       }
       // Handle server errors (e.g., show alert)
       else if (status >= 500) {

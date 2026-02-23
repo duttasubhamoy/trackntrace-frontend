@@ -257,23 +257,33 @@ const GenerateQrPage = () => {
   const executePrintPdf = async () => {
     setPrintPdfLoading(true);
     try {
-      let endpoint = "/print-primary-pdf";
-      let data = {
+      let endpoint;
+    let data;
+
+    if (qrType === "box") {
+      endpoint = "/print-secondary-pdf";
+      data = {
         batch_id: selectedBatch,
         num_entries: parseInt(numEntries, 10),
         width: parseInt(labelWidth, 10),
         height: parseInt(labelHeight, 10),
-        url_prefix: URL_PREFIX,
         dates_included: datesIncluded,
       };
-      if (qrType === "box") {
-        endpoint = "/print-secondary-pdf";
-        // include optional no_of_inner_boxes only if a non-zero integer was entered
-        const n = noOfInnerBoxes === "" ? 0 : parseInt(noOfInnerBoxes, 10);
-        if (!isNaN(n) && n > 0) {
-          data.no_of_inner_boxes = n;
-        }
+      const n = noOfInnerBoxes === "" ? 0 : parseInt(noOfInnerBoxes, 10);
+      if (!isNaN(n) && n > 0) {
+        data.no_of_inner_boxes = n;
       }
+    } else {
+      endpoint = "/print-primary-pdf";
+      data = {
+        batch_id: selectedBatch,
+        num_entries: parseInt(numEntries, 10),
+        width: parseInt(labelWidth, 10),
+        height: parseInt(labelHeight, 10),
+        url_prefix: URL_PREFIX,      // only for primary
+        dates_included: datesIncluded,
+      };
+    }
       const response = await axios.post(
         endpoint,
         data,

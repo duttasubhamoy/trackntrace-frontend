@@ -35,7 +35,7 @@ function searchInBuild(searchString) {
 // ensure the actual production backend URL is present in the bundle.
 
 // Verify production URL is present in at least one build file
-const PROD_URL = 'https://test.richi.life';
+const PROD_URL = 'https://test1.richi.life';
 const prodUrlFiles = searchInBuild(PROD_URL);
 if (prodUrlFiles.length === 0) {
     console.error('ERROR: Production URL not found in build files!');

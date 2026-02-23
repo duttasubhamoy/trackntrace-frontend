@@ -18,7 +18,7 @@ rm -rf build
 # 2. Build with production environment
 echo "Building with production environment..."
 export NODE_ENV=production
-export REACT_APP_BACKEND_URL=https://test.richi.life
+export REACT_APP_BACKEND_URL=https://test1.richi.life
 
 # Verify environment variables are set
 echo "Environment variables:"

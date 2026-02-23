@@ -1,11 +1,13 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "../utils/axiosConfig";
 import { CgSpinner } from "react-icons/cg";
-import { FiTrash2 } from "react-icons/fi";
+import { FiAlertCircle, FiTrash2 } from "react-icons/fi";
 import TableWithSearchAndPagination from "../components/TableWithSearchAndPagination";
 import Modal from "react-modal";
 import { useAuth } from "../context/AuthContext";
+import { collapse } from "@material-tailwind/react";
+
 
 Modal.setAppElement("#root");
 
@@ -17,6 +19,7 @@ const ShipmentPage = () => {
   // Shipment state management
   const [shipments, setShipments] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [indentLinkError, setIndentLinkError] = useState("");
   const [filteredShipments, setFilteredShipments] = useState([]);
   const [currentPage, setCurrentPage] = useState(0);
   const [shipmentsPerPage] = useState(10);
@@ -52,6 +55,10 @@ const ShipmentPage = () => {
   
   // Sellers state for dropdown filters
   const [sellers, setSellers] = useState([]);
+  const indentInputRefs = useRef({}); 
+  const lastAddedIndentUidRef = useRef(null);
+  const unitIdInputRef = useRef(null); // Add this ref for unit ID input
+  
   
   // Filter state
   const [filterValues, setFilterValues] = useState({
@@ -78,6 +85,20 @@ const ShipmentPage = () => {
 
     fetchData();
   }, [userData]);
+
+  useEffect(() => {
+    if (showAllocationModal && unitIdInputRef.current) {
+      setTimeout(() => {
+        unitIdInputRef.current.focus();
+      }, 100);
+    }
+  }, [showAllocationModal]);
+
+  useEffect(() => {
+    if (!isSearchingUnit && showAllocationModal && unitIdInputRef.current) {
+      unitIdInputRef.current.focus();
+    }
+  }, [isSearchingUnit, showAllocationModal]);
 
   // Fetch shipments from API
   const fetchShipments = async (filters = {}) => {
@@ -175,29 +196,54 @@ const ShipmentPage = () => {
     setShowCreateModal(true);
   };
 
+  useEffect(() => {
+    const uid = lastAddedIndentUidRef.current;
+    if (!uid) return;
+  
+    const el = indentInputRefs.current[uid];
+    if (el) el.focus();
+  
+    lastAddedIndentUidRef.current = null;
+  }, [linkedIndents]);
+  
+
   // Handle add indent link
   const handleAddIndentLink = () => {
-    setLinkedIndents([...linkedIndents, { indent_id: "" }]);
+    const uid = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    // store which indent should be focused after render
+    lastAddedIndentUidRef.current = uid;
+    setLinkedIndents((prev) => [...prev, { uid, indent_id: "" }]);
   };
 
   // Handle remove indent link
   const handleRemoveIndentLink = (index) => {
+    const uid = linkedIndents[index]?.uid;
+  
     const updatedIndents = linkedIndents.filter((_, i) => i !== index);
     setLinkedIndents(updatedIndents);
-    
-    // Clear any pending timer for this index
-    if (indentSearchTimers[index]) {
-      clearTimeout(indentSearchTimers[index]);
-      const updatedTimers = { ...indentSearchTimers };
-      delete updatedTimers[index];
-      setIndentSearchTimers(updatedTimers);
+  
+    // Clear the ref for this uid
+    if (uid) delete indentInputRefs.current[uid];
+  
+    // Clear any pending timer for this uid
+    if (uid && indentSearchTimers[uid]) {
+      clearTimeout(indentSearchTimers[uid]);
+      setIndentSearchTimers((prev) => {
+        const updated = { ...prev };
+        delete updated[uid];
+        return updated;
+      });
     }
-    
-    // Remove loading state for this index
-    const updatedLoadingStates = { ...indentLoadingStates };
-    delete updatedLoadingStates[index];
-    setIndentLoadingStates(updatedLoadingStates);
-    
+  
+    // Remove loading state for this uid
+    if (uid) {
+      setIndentLoadingStates((prev) => {
+        const updated = { ...prev };
+        delete updated[uid];
+        return updated;
+      });
+    }
+  
     // If all indents are removed, unlock both seller fields
     if (updatedIndents.length === 0) {
       setIsFromSellerLocked(false);
@@ -208,6 +254,7 @@ const ShipmentPage = () => {
       setToSellerName("");
     }
   };
+  
 
   // Fetch indent details and set to_seller
   const fetchIndentDetails = async (indentId) => {
@@ -228,84 +275,111 @@ const ShipmentPage = () => {
     const updatedIndents = [...linkedIndents];
     updatedIndents[index].indent_id = value;
     setLinkedIndents(updatedIndents);
-    
-    // Clear any existing timer for this indent
-    if (indentSearchTimers[index]) {
-      clearTimeout(indentSearchTimers[index]);
+  
+    const uid = updatedIndents[index]?.uid;
+    if (!uid) return;
+  
+    // Clear existing timer for this uid
+    if (indentSearchTimers[uid]) {
+      clearTimeout(indentSearchTimers[uid]);
     }
-    
-    // If value is empty, don't start a timer
+  
+    // If value is empty / not a number, stop
     if (!value || isNaN(value)) {
-      const updatedTimers = { ...indentSearchTimers };
-      delete updatedTimers[index];
-      setIndentSearchTimers(updatedTimers);
+      setIndentSearchTimers((prev) => {
+        const updated = { ...prev };
+        delete updated[uid];
+        return updated;
+      });
       return;
     }
-    
-    // Set a new timer for auto-search after 800ms of inactivity
+  
+    // Debounce search
     const timerId = setTimeout(() => {
       handleIndentSearch(index);
     }, 800);
-    
-    setIndentSearchTimers(prev => ({ ...prev, [index]: timerId }));
+  
+    setIndentSearchTimers((prev) => ({ ...prev, [uid]: timerId }));
   };
+  
 
   // Handle indent search
   const handleIndentSearch = async (index) => {
     const indentId = linkedIndents[index]?.indent_id;
-    
-    if (!indentId || isNaN(indentId)) {
-      return;
-    }
-
-    // Set loading state for this specific indent
-    setIndentLoadingStates(prev => ({ ...prev, [index]: true }));
-
+    const uid = linkedIndents[index]?.uid;
+    setIndentLinkError("");
+  
+    if (!indentId || isNaN(indentId)) return;
+  
+    if (uid) setIndentLoadingStates((prev) => ({ ...prev, [uid]: true }));
+  
     try {
       const indentDetails = await fetchIndentDetails(parseInt(indentId));
-      
-      if (indentDetails && indentDetails.to_seller) {
-        const indentToSellerId = indentDetails.to_seller.id || indentDetails.to_seller_id;
-        const indentToSellerName = indentDetails.to_seller.name || getSellerName(indentDetails.to_seller_id);
-        const indentFromSellerId = indentDetails.from_seller?.id || indentDetails.from_seller_id;
-        const indentFromSellerName = indentDetails.from_seller?.name || getSellerName(indentDetails.from_seller_id);
+  
+      if (indentDetails) {
+        // Check indent status first
+        const indentStatus = indentDetails.status;
         
-        // If this is the first indent, set the sellers
-        if (index === 0) {
-          // Shipment from_seller = indent to_seller (who will ship the items)
-          setFromSellerId(indentToSellerId);
-          setFromSellerName(indentToSellerName);
-          setIsFromSellerLocked(true);
-          
-          // Shipment to_seller = indent from_seller (who created the indent and will receive shipment)
-          setToSellerId(indentFromSellerId);
-          setToSellerName(indentFromSellerName);
-          setIsToSellerLocked(true);
-        } else {
-          // Validate subsequent indents have the same to_seller as first indent
-          if (indentToSellerId !== fromSellerId) {
-            alert(`Indent ${indentId} has a different supplier (to_seller). All indents must be from the same supplier.`);
-            // Clear this indent
-            const updatedIndents = [...linkedIndents];
-            updatedIndents[index].indent_id = "";
-            setLinkedIndents(updatedIndents);
-            return;
+        if (indentStatus === "FULFILLED") {
+          setIndentLinkError(`Indent ${indentId} is already FULFILLED and cannot be linked to a shipment.`);
+          const updatedIndents = [...linkedIndents];
+          updatedIndents[index].indent_id = "";
+          setLinkedIndents(updatedIndents);
+          return;
+        }
+        
+        if (indentStatus !== "APPROVED" && indentStatus !== "PARTIALLY_FULFILLED") {
+          setIndentLinkError(`Indent ${indentId} must be APPROVED to link to a shipment. Current status: ${indentStatus}`);
+          const updatedIndents = [...linkedIndents];
+          updatedIndents[index].indent_id = "";
+          setLinkedIndents(updatedIndents);
+          return;
+        }
+        
+        // Now check seller compatibility
+        if (indentDetails.to_seller) {
+          const indentToSellerId = indentDetails.to_seller.id || indentDetails.to_seller_id;
+          const indentToSellerName = indentDetails.to_seller.name || getSellerName(indentDetails.to_seller_id);
+          const indentFromSellerId = indentDetails.from_seller?.id || indentDetails.from_seller_id;
+          const indentFromSellerName = indentDetails.from_seller?.name || getSellerName(indentDetails.from_seller_id);
+    
+          if (index === 0) {
+            setFromSellerId(indentToSellerId);
+            setFromSellerName(indentToSellerName);
+            setIsFromSellerLocked(true);
+    
+            setToSellerId(indentFromSellerId);
+            setToSellerName(indentFromSellerName);
+            setIsToSellerLocked(true);
+          } else {
+            if (indentToSellerId !== fromSellerId) {
+              setIndentLinkError(
+                `Indent ${indentId} has a different supplier (to_seller). All indents must be from the same supplier.`
+              );
+              const updatedIndents = [...linkedIndents];
+              updatedIndents[index].indent_id = "";
+              setLinkedIndents(updatedIndents);
+              return;
+            }
           }
         }
       }
     } finally {
-      // Clear loading state for this indent
-      setIndentLoadingStates(prev => {
-        const updated = { ...prev };
-        delete updated[index];
-        return updated;
-      });
+      if (uid) {
+        setIndentLoadingStates((prev) => {
+          const updated = { ...prev };
+          delete updated[uid];
+          return updated;
+        });
+      }
     }
   };
+  
 
   // Handle create shipment submission
   const handleCreateShipmentSubmit = async () => {
     // Validate that we have at least one indent or sellers selected
+    console.log("Submitting shipment with linked indents:", linkedIndents);
     if (linkedIndents.length === 0 && (!fromSellerId || !toSellerId)) {
       alert("Please link at least one indent or select sellers");
       return;
@@ -325,12 +399,25 @@ const ShipmentPage = () => {
         .map(indent => fetchIndentDetails(parseInt(indent.indent_id)));
 
       const allIndentDetails = await Promise.all(indentDetailsPromises);
+
+      // Log all indent details to check fulfilled_quantity
+      console.log("All indent details:", allIndentDetails);
       
       // Collect all items from indents and aggregate by product
       const itemsMap = {};
       allIndentDetails.forEach(indentDetail => {
         if (indentDetail && indentDetail.items) {
+          // Log each indent's items with fulfilled_quantity
+          console.log(`Indent #${indentDetail.id} items:`, indentDetail.items);
+
           indentDetail.items.forEach(item => {
+            // Log individual item with fulfilled_quantity
+            console.log(`Item: ${item.product?.name || item.product_id}`, {
+              quantity: item.quantity,
+              fulfilled_quantity: item.fulfilled_quantity,
+              remaining_quantity: item.remaining_quantity,
+            });
+
             const productId = item.product?.id || item.product_id;
             const key = productId;
       
@@ -339,6 +426,8 @@ const ShipmentPage = () => {
               item.remaining_quantity != null
                 ? item.remaining_quantity
                 : (item.quantity - (item.fulfilled_quantity || 0));
+
+            console.log(`Calculated remaining for ${item.product?.name || productId}: ${remaining}`);
       
             if (itemsMap[key]) {
               itemsMap[key].quantity += remaining;
@@ -383,9 +472,20 @@ const ShipmentPage = () => {
       const linkPromises = linkedIndents
         .filter(indent => indent.indent_id && !isNaN(indent.indent_id))
         .map(indent => 
-          axios.post(`/${indent.indent_id}/link-shipment/${shipmentId}`)
+          axios
+            .post(`/${indent.indent_id}/link-shipment/${shipmentId}`)
             .catch(error => {
-              console.error(`Error linking indent ${indent.indent_id} to shipment ${shipmentId}:`, error);
+              console.error(
+                `Error linking indent ${indent.indent_id} to shipment ${shipmentId}:`,
+                error
+              );
+              // Extract the detailed error message from backend
+              const msg =
+                error.response?.data?.description ||
+                error.response?.data?.message ||
+                error.message ||
+                "Failed to link indent to shipment.";
+              alert(`Indent ${indent.indent_id}: ${msg}`);
               // Don't fail the entire process if one link fails
               return null;
             })
@@ -658,6 +758,11 @@ const ShipmentPage = () => {
     },
   ];
 
+  // Filter out items with zero quantity for display
+  const visibleIndentItemsForShipment = indentItemsForShipment.filter(
+    (item) => Number(item.quantity) > 0
+  );
+
   return (
     <>
       {isLoading ? (
@@ -751,18 +856,28 @@ const ShipmentPage = () => {
                     {linkedIndents.length > 0 && (
                       <div className="mt-4 space-y-3">
                         {linkedIndents.map((indent, index) => (
-                          <div key={index} className="flex items-center space-x-3">
+                          <div key={indent.uid} className="flex items-center space-x-3">
                             <div className="flex-1">
                               <input
                                 type="number"
+                                ref={(el) => {
+                                  if (el) indentInputRefs.current[indent.uid] = el;
+                                }}
                                 value={indent.indent_id}
                                 onChange={(e) => handleIndentIdChange(index, e.target.value)}
                                 onBlur={() => handleIndentSearch(index)}
                                 placeholder="Enter Indent ID"
                                 className="w-full px-4 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-teal-500"
                               />
+                              {indentLinkError && (
+                                <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start">
+                                  <FiAlertCircle className="text-red-500 text-xl mr-3 mt-0.5" />
+                                  <p className="text-red-700">{indentLinkError}</p>
+                                </div>
+                            )}
                             </div>
-                            {indentLoadingStates[index] ? (
+                              
+                            {indentLoadingStates[indent.uid] ? (
                               <div className="p-2">
                                 <CgSpinner className="animate-spin text-teal-600" size={20} />
                               </div>
@@ -778,6 +893,7 @@ const ShipmentPage = () => {
                             )}
                           </div>
                         ))}
+
 
                         {/* Show the link below textboxes */}
                         <button
@@ -854,8 +970,8 @@ const ShipmentPage = () => {
                               </tr>
                             </thead>
                             <tbody>
-                              {indentItemsForShipment.length > 0 ? (
-                                indentItemsForShipment.map((item, index) => {
+                              {visibleIndentItemsForShipment.length > 0 ? (
+                                visibleIndentItemsForShipment.map((item, index) => {
                                   const productId = item.product?.id || item.product_id;
                                   const actualQty = actualQuantities[productId] || 0;
                                   return (
@@ -892,6 +1008,7 @@ const ShipmentPage = () => {
                         <div className="flex items-center space-x-3">
                           <input
                             type="text"
+                            ref={unitIdInputRef}
                             value={unitIdInput}
                             onChange={(e) => handleUnitIdInputChange(e.target.value)}
                             placeholder="Enter or scan unit ID"
